@@ -3,7 +3,7 @@
 ## Overview
 
 ```
-audio file
+audio file  (or directory via `index`)
   -> validation and metadata probe
   -> decode / channel-aware load
   -> content SHA-256
@@ -28,7 +28,8 @@ audio file
 | `neuroacoustic.fingerprint.*` | Pydantic models, builder, preliminary vector |
 | `neuroacoustic.persistence.*` | SQLite engine, ORM, config hash, repository |
 | `neuroacoustic.pipeline` | Orchestrates analyze → JSON/plots → optional DB |
-| `neuroacoustic.cli` | `doctor`, `probe`, `analyze`, `db init\|list\|show\|stats` |
+| `neuroacoustic.indexing.*` | Deterministic discovery + batch index over `run_pipeline` |
+| `neuroacoustic.cli` | `doctor`, `probe`, `analyze`, `index`, `db init\|list\|show\|stats` |
 | `neuroacoustic.visualization.*` | Non-interactive matplotlib PNG plots |
 
 ## SQLite schema (db_schema_version = 1)
@@ -120,11 +121,70 @@ a multi-path history is a later enhancement.
 
 Without `--database`, JSON/plots only (backward compatible).
 
+## Batch indexing (`index DIRECTORY`)
+
+```
+directory
+  -> pathlib discovery (sorted, extension filter, include/exclude)
+  -> skip output dir, DB/WAL/SHM, hidden/temp, unsupported types
+  -> for each file: run_pipeline(..., database=...)
+  -> dispositions: analyzed | reused | forced | failed | skipped
+  -> atomic IndexReport JSON (--report) and optional --json stdout
+```
+
+Discovery defaults: recursive on; **do not follow symlinks**; case-insensitive
+extensions `{wav,wave,flac,aiff,aif,mp3}`; deterministic casefold sort;
+realpath dedupe. Symlink directory loops are blocked via a visited-realpath set
+when `--follow-symlinks` is enabled.
+
+**Counters:** `discovered` = supported-extension candidates after structural
+skips (not hidden/temp, not under resolved output/skip dirs, not skip files,
+symlink policy, deduped). Include/exclude are applied next; `supported` =
+accepted queue (`len(files)`). Unsupported types (`.txt`, `.json`, `.png`, …)
+never enter either counter. Excluded-by-pattern files increment `discovered`
+only.
+
+**Artifacts:** `{output}/by_hash/{hh}/{content_hash}_{safe_stem}_*` so same
+basenames with different bytes cannot collide. Writes use temp + `os.replace`
+where practical (fingerprint JSON, plots, index reports).
+
+**Source integrity:** after analysis (and before persist), size/mtime is checked
+against the post-load signature; a re-hash runs only if metadata changed. A
+content mismatch raises `file_changed_during_analysis` and refuses to persist a
+completed fingerprint under the wrong identity.
+
+**Resume:** there is no separate resume database — completed SQLite analyses are
+the cache. Identical second runs should show `reused` for unchanged scientific
+identities.
+
+**Concurrency:** `--workers` default **1** (max 8). Prefer workers=1 for first
+production runs. Threads only; each task owns its pipeline/DB session. Duplicate
+content races recover via `IntegrityError` → reuse completed winner. When
+workers > 1, BLAS/OpenMP env caps are `setdefault`'d to 1 but only help if set
+**before** NumPy import/init — the CLI cannot guarantee that after load.
+
+**Interruption:** SIGINT sets a stop flag, stops scheduling new files, lets
+in-flight work finish or skip, writes a consistent partial report, preserves
+completed rows, exits **130**.
+
+**Exit codes:** `0` complete without failures; `2` complete with per-file
+failures (continue-on-error); `1` fail-fast / fatal batch failure; `130`
+interrupted; other non-zero = invalid invocation.
+
+### IndexReport schema (summary)
+
+Top-level fields include `root_directory`, `database_path`, `started_at`,
+`finished_at`, `elapsed_seconds`, discovery/worker flags, counters
+(`discovered`, `supported`, `analyzed`, `reused`, `forced`, `failed`,
+`skipped`), version strings, `config_hash`, and `files[]` with per-file
+`path`, `disposition`, `analysis_id`, `duration_seconds`, `error`, `warnings`.
+Public reports omit stack traces.
+
 ## Future vector search
 
 SQLite remains the local system of record for fingerprints and metadata.
 A later vector database (e.g. Qdrant) will index embeddings without making
-SQLite rows disposable.
+SQLite rows disposable. Batch indexing does **not** implement similarity search.
 
 ## Safety
 
@@ -133,3 +193,5 @@ SQLite rows disposable.
   `IntegrityError` and re-fetch only a **completed** winning row.
 - Transactions roll back on error; sessions are closed in `session_scope`.
 - Source audio is never overwritten.
+- Indexing never uses `shell=True`; paths are never interpolated into shells.
+- Output directory and database files are excluded from discovery self-scans.

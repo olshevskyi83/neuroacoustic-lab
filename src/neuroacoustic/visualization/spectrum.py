@@ -6,6 +6,8 @@ Axes are labeled with physical units (seconds, Hz, linear amplitude / dB).
 
 from __future__ import annotations
 
+import os
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -21,6 +23,28 @@ def _use_agg() -> None:
     import matplotlib
 
     matplotlib.use("Agg")
+
+
+def _atomic_savefig(fig, out_path: Path, *, dpi: int = 120) -> None:  # type: ignore[no-untyped-def]
+    """Save a figure via a same-directory temp file then ``os.replace``."""
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    suffix = out_path.suffix or ".png"
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{out_path.name}.",
+        suffix=suffix,
+        dir=str(out_path.parent),
+    )
+    os.close(fd)
+    try:
+        fig.savefig(tmp_name, dpi=dpi, format=suffix.lstrip(".") or "png")
+        os.replace(tmp_name, out_path)
+    except Exception:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
 
 
 def plot_waveform(
@@ -46,8 +70,7 @@ def plot_waveform(
     ax.set_title(title)
     ax.grid(True, alpha=0.3)
     fig.tight_layout()
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_path, dpi=120)
+    _atomic_savefig(fig, out_path)
     plt.close(fig)
     logger.info("Wrote waveform plot %s", out_path)
     return out_path
@@ -83,8 +106,7 @@ def plot_fft_magnitude(
         ax.set_xscale("log")
     ax.grid(True, which="both", alpha=0.3)
     fig.tight_layout()
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_path, dpi=120)
+    _atomic_savefig(fig, out_path)
     plt.close(fig)
     logger.info("Wrote FFT plot %s", out_path)
     return out_path
@@ -127,8 +149,7 @@ def plot_spectrogram(
     cbar = fig.colorbar(im, ax=ax, pad=0.02)
     cbar.set_label("Power (dB re peak)")
     fig.tight_layout()
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_path, dpi=120)
+    _atomic_savefig(fig, out_path)
     plt.close(fig)
-    logger.info("Wrote spectrogram %s", out_path)
+    logger.info("Wrote spectrogram plot %s", out_path)
     return out_path

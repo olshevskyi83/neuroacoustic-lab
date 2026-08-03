@@ -21,10 +21,12 @@ from neuroacoustic.analysis.spectrum import compute_fft_summary, compute_stft
 from neuroacoustic.analysis.stats import to_mono
 from neuroacoustic.analysis.stereo import compute_stereo_features
 from neuroacoustic.audio.loader import LoadedAudio, load_audio
+from neuroacoustic.audio.probe import sha256_file
 from neuroacoustic.config import AppConfig
 from neuroacoustic.exceptions import AudioValidationError, NeuroAcousticError
 from neuroacoustic.fingerprint.builder import build_fingerprint
 from neuroacoustic.fingerprint.models import AcousticFingerprint, ArtifactPaths
+from neuroacoustic.io_atomic import atomic_write_text
 from neuroacoustic.logging import get_logger
 from neuroacoustic.persistence.config_hash import compute_config_hash
 from neuroacoustic.persistence.database import assert_db_usable, init_db, session_scope
@@ -80,23 +82,65 @@ def _assert_json_finite(payload: object, path: str = "$") -> None:
 def _write_fingerprint_json(fingerprint: AcousticFingerprint, fp_path: Path) -> AcousticFingerprint:
     payload = fingerprint.to_json_dict()
     _assert_json_finite(payload)
-    fp_path.parent.mkdir(parents=True, exist_ok=True)
-    fp_path.write_text(
-        json.dumps(payload, indent=2, allow_nan=False) + "\n", encoding="utf-8"
+    atomic_write_text(
+        fp_path, json.dumps(payload, indent=2, allow_nan=False) + "\n"
     )
     fingerprint.artifacts.fingerprint_json = str(fp_path.resolve())
     payload = fingerprint.to_json_dict()
     _assert_json_finite(payload)
-    fp_path.write_text(
-        json.dumps(payload, indent=2, allow_nan=False) + "\n", encoding="utf-8"
+    atomic_write_text(
+        fp_path, json.dumps(payload, indent=2, allow_nan=False) + "\n"
     )
     return fingerprint
 
 
 def _artifact_base(out_dir: Path, loaded: LoadedAudio) -> Path:
+    """Collision-safe artifact stem rooted in full content hash.
+
+    Layout: ``{output}/by_hash/{hh}/{content_hash}_{safe_stem}``
+
+    Same basename in different directories cannot overwrite each other when
+    bytes differ. Identical bytes share the hash prefix (safe concurrent
+    writes target the same final names via atomic replace).
+    """
     stem = _stem_safe(loaded.source.filename)
-    content_short = loaded.source.content_hash[:12]
-    return out_dir / f"{stem}_{content_short}"
+    content_hash = loaded.source.content_hash
+    return out_dir / "by_hash" / content_hash[:2] / f"{content_hash}_{stem}"
+
+
+def _file_signature(path: Path) -> tuple[int, int] | None:
+    try:
+        st = path.stat()
+        return int(st.st_size), int(getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9)))
+    except OSError:
+        return None
+
+
+def _verify_source_identity(
+    path: Path,
+    expected_hash: str,
+    pre_sig: tuple[int, int] | None,
+    warnings: list[str],
+) -> None:
+    """Fail if on-disk bytes no longer match the analyzed content identity.
+
+    Uses size/mtime as a cheap first check; rehashes only when metadata
+    changed (avoids an unconditional second full-file hash).
+    """
+    post_sig = _file_signature(path)
+    if post_sig is None:
+        raise AudioValidationError(
+            "file_changed_during_analysis: source disappeared or became unreadable"
+        )
+    if pre_sig is not None and post_sig == pre_sig:
+        return
+    current = sha256_file(path)
+    if current != expected_hash:
+        raise AudioValidationError(
+            "file_changed_during_analysis: on-disk content hash no longer matches "
+            "the fingerprint identity; refusing to persist mismatched analysis"
+        )
+    warnings.append("file_metadata_changed_during_analysis_hash_unchanged")
 
 
 def _path_exists(value: str | None) -> bool:
@@ -362,7 +406,11 @@ def run_pipeline(
     out_dir = Path(output_dir or config.paths.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    pre_sig = _file_signature(audio_path)
     loaded = load_audio(audio_path, config)
+    # Refresh signature after hashing/load so routine probe I/O does not
+    # force a redundant re-hash when only atime changed.
+    pre_sig = _file_signature(audio_path) or pre_sig
     duration = loaded.source.duration_seconds
     if (
         duration is not None
@@ -431,6 +479,12 @@ def run_pipeline(
                     cached_artifact_paths=cached_arts,
                 )
                 pipeline_warnings.extend(art_warnings)
+                _verify_source_identity(
+                    audio_path,
+                    loaded.source.content_hash,
+                    pre_sig,
+                    pipeline_warnings,
+                )
                 arts = fp.artifacts
                 with session_scope(engine) as session:
                     update_analysis_artifact_paths(
@@ -461,6 +515,12 @@ def run_pipeline(
         try:
             fingerprint, fp_path = _run_analysis(
                 loaded, config, out_dir=out_dir, plots=plots
+            )
+            _verify_source_identity(
+                audio_path,
+                loaded.source.content_hash,
+                pre_sig,
+                pipeline_warnings,
             )
         except Exception as exc:
             # Never overwrite a completed row with a failed forced attempt.
@@ -540,6 +600,12 @@ def run_pipeline(
         )
 
     fingerprint, fp_path = _run_analysis(loaded, config, out_dir=out_dir, plots=plots)
+    _verify_source_identity(
+        audio_path,
+        loaded.source.content_hash,
+        pre_sig,
+        pipeline_warnings,
+    )
     return PipelineResult(
         fingerprint=fingerprint,
         fingerprint_path=fp_path,

@@ -550,6 +550,178 @@ def db_stats(
     console.print(table)
 
 
+@app.command("index")
+def index_cmd(
+    directory: Path = typer.Argument(..., help="Root directory to index"),
+    database: Optional[Path] = typer.Option(
+        None, "--database", help="SQLite database path (required for persistence)"
+    ),
+    config: Optional[Path] = typer.Option(None, "--config"),
+    recursive: bool = typer.Option(True, "--recursive/--no-recursive"),
+    include: Optional[list[str]] = typer.Option(
+        None, "--include", help="fnmatch include pattern (repeatable)"
+    ),
+    exclude: Optional[list[str]] = typer.Option(
+        None, "--exclude", help="fnmatch exclude pattern (repeatable)"
+    ),
+    follow_symlinks: bool = typer.Option(
+        False, "--follow-symlinks/--no-follow-symlinks"
+    ),
+    plots: bool = typer.Option(False, "--plots/--no-plots"),
+    output_dir: Optional[Path] = typer.Option(None, "--output-dir"),
+    force: bool = typer.Option(False, "--force"),
+    continue_on_error: bool = typer.Option(
+        True, "--continue-on-error/--fail-fast"
+    ),
+    workers: int = typer.Option(1, "--workers", help="Worker threads (1–8; default 1)"),
+    report: Optional[Path] = typer.Option(None, "--report", help="Write JSON report path"),
+    as_json: bool = typer.Option(False, "--json", help="Emit IndexReport JSON on stdout"),
+    quiet: bool = typer.Option(False, "--quiet", help="Suppress progress display"),
+    analysis_sample_rate: Optional[int] = typer.Option(None, "--analysis-sample-rate"),
+) -> None:
+    """Recursively discover and analyze audio files into SQLite."""
+    from rich.progress import (
+        BarColumn,
+        MofNCompleteColumn,
+        Progress,
+        SpinnerColumn,
+        TaskProgressColumn,
+        TextColumn,
+        TimeElapsedColumn,
+    )
+
+    from neuroacoustic.indexing.indexer import IndexOptions, run_index, validate_workers
+    from neuroacoustic.indexing.report import IndexReport
+
+    try:
+        validate_workers(workers)
+    except ValueError as exc:
+        _fail(str(exc))
+
+    try:
+        cfg = load_config(config)
+        if analysis_sample_rate is not None:
+            cfg = cfg.model_copy(
+                update={
+                    "audio": cfg.audio.model_copy(
+                        update={"analysis_sample_rate": analysis_sample_rate}
+                    )
+                }
+            )
+        if output_dir is not None:
+            cfg = cfg.model_copy(
+                update={"paths": cfg.paths.model_copy(update={"output_dir": output_dir})}
+            )
+        db_path = database if database is not None else cfg.paths.database
+        if db_path is None:
+            _fail("--database is required (or set paths.database in config)")
+
+        log_level = "WARNING" if quiet or as_json else cfg.logging.level
+        setup_logging(log_level, json_logs=cfg.logging.json_logs)
+
+        options = IndexOptions(
+            root=directory,
+            database=Path(db_path),
+            output_dir=Path(output_dir or cfg.paths.output_dir),
+            recursive=recursive,
+            follow_symlinks=follow_symlinks,
+            include=list(include or []),
+            exclude=list(exclude or []),
+            plots=plots,
+            force=force,
+            continue_on_error=continue_on_error,
+            workers=workers,
+            report_path=report,
+            quiet=quiet or as_json,
+        )
+
+        progress_ctx = None
+        task_id = None
+        counts = {"analyzed": 0, "reused": 0, "forced": 0, "failed": 0, "skipped": 0}
+
+        def on_progress(completed: int, total: int, item) -> None:  # type: ignore[no-untyped-def]
+            counts[item.disposition] = counts.get(item.disposition, 0) + 1
+            if progress_ctx is not None and task_id is not None:
+                progress_ctx.update(
+                    task_id,
+                    completed=completed,
+                    description=(
+                        f"{Path(item.path).name[:40]}  "
+                        f"a={counts['analyzed']} r={counts['reused']} "
+                        f"f={counts['failed']} s={counts['skipped']}"
+                    ),
+                )
+
+        if not as_json and not quiet:
+            progress_ctx = Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                BarColumn(),
+                MofNCompleteColumn(),
+                TaskProgressColumn(),
+                TimeElapsedColumn(),
+                console=err_console,
+            )
+            progress_ctx.start()
+            task_id = progress_ctx.add_task("index", total=0)
+
+        try:
+            def on_discovered(n: int) -> None:
+                if progress_ctx is not None and task_id is not None:
+                    progress_ctx.update(task_id, total=n)
+
+            result = run_index(
+                cfg,
+                options,
+                progress_callback=None if (as_json or quiet) else on_progress,
+                on_discovered=None if (as_json or quiet) else on_discovered,
+            )
+        finally:
+            if progress_ctx is not None:
+                progress_ctx.stop()
+
+        report_obj: IndexReport = result.report
+        if as_json:
+            sys.stdout.write(
+                json.dumps(report_obj.model_dump(mode="json"), allow_nan=False) + "\n"
+            )
+        else:
+            table = Table(title=f"Index: {directory}")
+            table.add_column("Field", style="cyan")
+            table.add_column("Value")
+            for key, value in (
+                ("database", report_obj.database_path),
+                ("discovered", str(report_obj.discovered)),
+                ("supported", str(report_obj.supported)),
+                ("analyzed", str(report_obj.analyzed)),
+                ("reused", str(report_obj.reused)),
+                ("forced", str(report_obj.forced)),
+                ("failed", str(report_obj.failed)),
+                ("skipped", str(report_obj.skipped)),
+                ("elapsed_seconds", str(report_obj.elapsed_seconds)),
+                ("config_hash", report_obj.config_hash[:16] + "…"),
+                ("report", str(result.report_path or "—")),
+                ("interrupted", str(report_obj.interrupted)),
+            ):
+                table.add_row(key, value)
+            console.print(table)
+            if report_obj.failed:
+                err_console.print(
+                    f"[yellow]warning:[/yellow] {report_obj.failed} file(s) failed"
+                )
+
+        if result.exit_code:
+            raise typer.Exit(result.exit_code)
+    except typer.Exit:
+        raise
+    except (FileNotFoundError, NotADirectoryError, PermissionError) as exc:
+        _fail(str(exc))
+    except NeuroAcousticError as exc:
+        _fail(str(exc))
+    except Exception as exc:  # noqa: BLE001
+        _fail(f"Unexpected error: {exc}")
+
+
 def main() -> None:
     app()
 

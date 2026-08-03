@@ -15,8 +15,8 @@ level = "INFO"
 json_logs = false
 
 [audio]
-supported_extensions = ["wav", "flac", "aiff", "aif", "mp3"]
-soundfile_extensions = ["wav", "flac", "aiff", "aif"]
+supported_extensions = ["wav", "wave", "flac", "aiff", "aif", "mp3"]
+soundfile_extensions = ["wav", "wave", "flac", "aiff", "aif"]
 ffmpeg_extensions = ["mp3"]
 
 silence_peak_threshold = 1.0e-6

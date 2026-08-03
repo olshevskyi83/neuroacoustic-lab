@@ -42,6 +42,10 @@ data/output/*
 !data/output/.gitkeep
 data/db/*
 !data/db/.gitkeep
+# Ephemeral demos / local scratch (not user source libraries)
+data/tmp/
+data/tmp_*/
+work/
 
 # Generated audio fixtures (keep directory)
 tests/fixtures/*

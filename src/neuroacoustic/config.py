@@ -44,10 +44,10 @@ class LoggingConfig(BaseModel):
 
 class AudioConfig(BaseModel):
     supported_extensions: list[str] = Field(
-        default_factory=lambda: ["wav", "flac", "aiff", "aif", "mp3"]
+        default_factory=lambda: ["wav", "wave", "flac", "aiff", "aif", "mp3"]
     )
     soundfile_extensions: list[str] = Field(
-        default_factory=lambda: ["wav", "flac", "aiff", "aif"]
+        default_factory=lambda: ["wav", "wave", "flac", "aiff", "aif"]
     )
     ffmpeg_extensions: list[str] = Field(default_factory=lambda: ["mp3"])
     analysis_sample_rate: int | None = None
