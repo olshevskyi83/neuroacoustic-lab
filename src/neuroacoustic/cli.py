@@ -213,20 +213,89 @@ def probe_cmd(
 def analyze_cmd(
     audio_file: Path = typer.Argument(..., help="Path to audio file"),
     output_dir: Optional[Path] = typer.Option(None, "--output-dir"),
-    database: Optional[Path] = typer.Option(None, "--database"),
+    database: Optional[Path] = typer.Option(
+        None,
+        "--database",
+        help="SQLite path (ignored in Milestone 2; persistence arrives in Milestone 4)",
+    ),
     config: Optional[Path] = typer.Option(None, "--config"),
     analysis_sample_rate: Optional[int] = typer.Option(None, "--analysis-sample-rate"),
-    plots: bool = typer.Option(False, "--plots/--no-plots", help="Generate plots (Milestone 4)"),
-    force: bool = typer.Option(False, "--force"),
-    as_json: bool = typer.Option(False, "--json"),
+    plots: bool = typer.Option(
+        True,
+        "--plots/--no-plots",
+        help="Generate waveform / FFT / spectrogram PNG plots",
+    ),
+    force: bool = typer.Option(False, "--force", help="Allow files longer than max_duration"),
+    as_json: bool = typer.Option(False, "--json", help="Print fingerprint JSON to stdout"),
 ) -> None:
-    """Run full analysis (Milestone 2+). Not available in Milestone 1."""
-    _ = (audio_file, output_dir, database, config, analysis_sample_rate, plots, force, as_json)
-    _fail(
-        "analyze is not implemented in Milestone 1. "
-        "Use `neuroacoustic probe` for metadata. Full fingerprinting arrives in Milestone 2.",
-        code=2,
-    )
+    """Run Milestone 2 analysis, write fingerprint JSON, and optional plots."""
+    from neuroacoustic.pipeline import run_pipeline
+
+    try:
+        cfg = load_config(config)
+        if analysis_sample_rate is not None:
+            cfg = cfg.model_copy(
+                update={
+                    "audio": cfg.audio.model_copy(
+                        update={"analysis_sample_rate": analysis_sample_rate}
+                    )
+                }
+            )
+        if output_dir is not None:
+            cfg = cfg.model_copy(
+                update={"paths": cfg.paths.model_copy(update={"output_dir": output_dir})}
+            )
+        if database is not None:
+            err_console.print(
+                "[yellow]warning:[/yellow] --database is accepted but SQLite "
+                "persistence is deferred to Milestone 4; writing JSON only."
+            )
+        setup_logging(cfg.logging.level, json_logs=cfg.logging.json_logs)
+        result = run_pipeline(
+            audio_file,
+            cfg,
+            output_dir=cfg.paths.output_dir,
+            plots=plots,
+            force=force,
+        )
+    except NeuroAcousticError as exc:
+        _fail(str(exc))
+    except Exception as exc:  # noqa: BLE001
+        _fail(f"Unexpected error: {exc}")
+
+    fp = result.fingerprint
+    if as_json:
+        console.print_json(json.dumps(fp.to_json_dict()))
+        return
+
+    table = Table(title=f"Analyze: {fp.source.filename}")
+    table.add_column("Field", style="cyan")
+    table.add_column("Value")
+    rows = [
+        ("fingerprint", str(result.fingerprint_path)),
+        ("schema_version", fp.schema_version),
+        ("analysis_version", fp.analysis_version),
+        ("content_hash", fp.source.content_hash),
+        ("duration_seconds", str(fp.source.duration_seconds)),
+        ("analysis_sample_rate", str(fp.source.analysis_sample_rate)),
+        ("fft_peak_hz", str(fp.spectral.fft.peak_frequency_hz)),
+        ("centroid_mean_hz", str(fp.spectral.centroid_hz.mean)),
+        ("flatness_mean", str(fp.spectral.flatness.mean)),
+        ("entropy_mean", str(fp.spectral.entropy.mean)),
+        ("rms", str(fp.energy.rms)),
+        ("peak_amplitude", str(fp.energy.peak_amplitude)),
+        ("crest_factor", str(fp.energy.crest_factor)),
+        ("zcr", str(fp.energy.zero_crossing_rate)),
+        ("estimated_dynamic_range_db", str(fp.energy.estimated_dynamic_range_db)),
+        ("vector_len", str(len(fp.vector))),
+    ]
+    for key, value in rows:
+        table.add_row(key, value)
+    console.print(table)
+    for warning in fp.quality.warnings:
+        err_console.print(f"[yellow]warning:[/yellow] {warning}")
+    if fp.artifacts.waveform_png:
+        console.print(f"plots: {fp.artifacts.waveform_png}")
 
 
 @db_app.command("list")

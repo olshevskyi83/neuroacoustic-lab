@@ -4,7 +4,7 @@ Local-first research platform for analyzing sound by its **physical acoustic pro
 
 The first milestone is a reliable **Audio Analysis Engine** that turns an audio file into a reproducible acoustic fingerprint.
 
-> **Current status:** Milestone 1 — environment tooling, configuration, audio probe/loader, and `doctor` / `probe` CLI. Full spectral fingerprinting arrives in later milestones.
+> **Current status:** Milestone 2 — spectral + energy fingerprinting, JSON export, and PNG plots. Pitch/harmonics (M3) and SQLite/persistence extras (M4) are not implemented yet.
 
 ## Philosophy
 
@@ -55,9 +55,13 @@ neuroacoustic probe path/to/audio.wav
 
 # Machine-readable probe output
 neuroacoustic probe path/to/audio.wav --json
+
+# Milestone 2 analysis → fingerprint JSON (+ plots by default)
+neuroacoustic analyze path/to/audio.wav --output-dir data/output
+neuroacoustic analyze path/to/audio.wav --no-plots --json
 ```
 
-`analyze`, `db list`, and `db show` are stubbed until later milestones.
+`db list` / `db show` remain stubbed until Milestone 4.
 
 ## Output locations
 
@@ -72,13 +76,14 @@ neuroacoustic probe path/to/audio.wav --json
 
 A versioned Pydantic document capturing source metadata, analysis config, quality warnings, acoustic feature summaries, and a preliminary comparison vector. Schema details: [`docs/fingerprint-schema.md`](docs/fingerprint-schema.md).
 
-## Current limitations (Milestone 1)
+## Current limitations (Milestone 2)
 
-- No full acoustic fingerprint yet (spectral / pitch / rhythm modules deferred).
-- No SQLite persistence yet.
-- No plot generation yet.
-- MP3 decoding requires FFmpeg; without it, probe/load of MP3 fails with a clear error.
-- Analysis sample-rate resampling is implemented in the loader but unused by a full pipeline until Milestone 2.
+- Pitch, harmonics, envelope, stereo, rhythm, and reverb are empty placeholders.
+- No SQLite persistence yet (`--database` ignored with a warning).
+- Preliminary comparison vector is heuristically scaled — not corpus-normalized.
+- `estimated_dynamic_range_db` is a frame-RMS percentile heuristic, **not LUFS**.
+- Spectral/energy features use a mono mixdown of multi-channel files.
+- MP3 decoding requires FFmpeg.
 
 ## Tests
 

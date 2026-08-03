@@ -2,50 +2,42 @@
 
 ## Overview
 
-NeuroAcoustic Lab is a modular audio analysis pipeline:
-
 ```
 audio file
   -> validation and ffprobe metadata
   -> decoding/loading
-  -> channel-aware preprocessing
-  -> frame-level acoustic analysis      (Milestone 2+)
-  -> time aggregation                   (Milestone 2+)
-  -> fingerprint construction           (Milestone 2+)
-  -> JSON export
+  -> channel-aware preprocessing (mono mean for M2 features)
+  -> FFT summary + STFT (in-memory)
+  -> spectral + energy features
+  -> fingerprint construction (summaries only)
+  -> JSON export + optional PNG plots
   -> SQLite persistence                 (Milestone 4)
-  -> optional plot generation           (Milestone 4)
 ```
 
 ## Module responsibilities
 
 | Package | Role |
 |---------|------|
-| `neuroacoustic.config` | Load TOML config; apply environment / CLI overrides |
-| `neuroacoustic.logging` | Structured application logging |
-| `neuroacoustic.exceptions` | Typed domain errors for CLI exit handling |
-| `neuroacoustic.audio.probe` | File validation, content hash, container metadata |
-| `neuroacoustic.audio.loader` | Decode via soundfile or FFmpeg fallback |
-| `neuroacoustic.audio.preprocessing` | Channel handling, optional resample, float conversion |
-| `neuroacoustic.analysis.*` | Feature extractors (Milestone 2+) |
-| `neuroacoustic.fingerprint` | Pydantic models and fingerprint builder |
-| `neuroacoustic.persistence` | SQLite storage (Milestone 4) |
-| `neuroacoustic.visualization` | Non-interactive matplotlib plots (Milestone 4) |
-| `neuroacoustic.pipeline` | End-to-end orchestration (Milestone 2+) |
-| `neuroacoustic.cli` | Typer CLI (`doctor`, `probe`, …) |
+| `neuroacoustic.config` | TOML + env/CLI overrides |
+| `neuroacoustic.audio.*` | Probe, decode, float convert, resample, quality |
+| `neuroacoustic.analysis.spectrum` | FFT summary, STFT |
+| `neuroacoustic.analysis.spectral` | Centroid, bandwidth, rolloff, contrast, flatness, entropy |
+| `neuroacoustic.analysis.energy` | RMS, ZCR, peak, crest, estimated dynamic range |
+| `neuroacoustic.fingerprint.*` | Pydantic models, builder, preliminary vector |
+| `neuroacoustic.visualization.*` | Non-interactive matplotlib PNG plots |
+| `neuroacoustic.pipeline` | Orchestrates analyze → JSON/plots |
+| `neuroacoustic.cli` | `doctor`, `probe`, `analyze` |
 
-## Milestone 1 processing flow
+## Milestone 2 persistence flow
 
-1. Resolve config from `config/default.toml` (+ env / CLI).
-2. `probe`: validate path/extension → hash file → gather metadata via soundfile and/or ffprobe → return `SourceMetadata`.
-3. `load` (used by tests / later analyze): decode samples → float32 in `[-1, 1]` (when integer source) → optional resample → basic quality checks (NaN/Inf, silence).
-
-## Persistence flow (planned)
-
-Milestone 4 will store track identity, content hash, schema/analysis versions, config hash, scalar columns, full fingerprint JSON, artifact paths, status, and timestamps. Duplicate analyses (same content + analysis version + config) will be detectable.
+1. `analyze` loads config and audio.
+2. Pipeline writes `{stem}_{hash12}_fingerprint.json` under `--output-dir`.
+3. Optional plots: waveform, FFT, log-frequency FFT, spectrogram PNGs.
+4. SQLite is **not** written yet (Milestone 4); `--database` is accepted with a warning.
 
 ## Safety
 
-- Never execute filenames or metadata as shell code.
-- FFmpeg is invoked with argument arrays (`shell=False`).
+- FFmpeg via argument arrays (`shell=False`).
+- JSON written with `allow_nan=False`; pipeline rejects non-finite floats.
 - Source audio is never overwritten.
+- Long-file STFT is frame-aggregated; raw matrices are not serialized.

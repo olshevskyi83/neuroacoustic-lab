@@ -1,61 +1,89 @@
 # Fingerprint schema
 
-## Status
+## Current version
 
-**Milestone 1** defines source and analysis-config models only. The full fingerprint document lands in Milestone 2+.
+- `schema_version`: **0.2.0** (Milestone 2 structure)
+- `analysis_version`: **0.2.0** (spectral + energy algorithms)
 
-## Target structure (Phase 1)
+## Document shape
 
 ```json
 {
-  "schema_version": "0.1.0",
-  "analysis_version": "0.1.0",
+  "schema_version": "0.2.0",
+  "analysis_version": "0.2.0",
   "source": { "...": "SourceMetadata" },
   "analysis_config": { "...": "AnalysisConfigSnapshot" },
   "quality": {
     "clipping_ratio": 0.0,
     "silence_ratio": 0.0,
+    "peak_amplitude": 0.0,
     "warnings": []
   },
-  "spectral": {},
+  "spectral": {
+    "fft": { "peak_frequency_hz": 440.0, "peaks": [], "summary_*": [] },
+    "stft": {
+      "n_fft": 2048,
+      "hop_length": 512,
+      "n_frames": 87,
+      "mean_spectrum_frequencies_hz": [],
+      "mean_spectrum_magnitudes": []
+    },
+    "centroid_hz": { "mean": 0, "std": 0, "median": 0, "p05": 0, "p25": 0, "p75": 0, "p95": 0, "minimum": 0, "maximum": 0, "count": 0 },
+    "bandwidth_hz": {},
+    "rolloff_hz": {},
+    "flatness": {},
+    "entropy": {},
+    "contrast_db": {},
+    "centroid_curve": { "times_seconds": [], "values": [], "unit": "Hz" },
+    "flatness_curve": {}
+  },
   "pitch": {},
   "harmonics": {},
-  "energy": {},
+  "energy": {
+    "rms": 0.0,
+    "rms_db": 0.0,
+    "peak_amplitude": 0.0,
+    "crest_factor": 0.0,
+    "zero_crossing_rate": 0.0,
+    "estimated_dynamic_range_db": 0.0,
+    "rms_frame": {},
+    "rms_curve": {}
+  },
   "envelope": {},
   "stereo": {},
   "rhythm": {},
   "reverberation": {},
   "vector": [],
+  "vector_meta": {
+    "version": "0.2.0-preliminary",
+    "values": [],
+    "labels": [],
+    "note": "Preliminary..."
+  },
+  "artifacts": {
+    "fingerprint_json": "...",
+    "waveform_png": "...",
+    "fft_png": "...",
+    "fft_log_png": "...",
+    "spectrogram_png": "..."
+  },
   "created_at": "ISO-8601"
 }
 ```
 
-## Schema versioning
+## What is intentionally omitted
 
-- `schema_version` — shape of the JSON document (fields, nesting). Bump on breaking structural changes.
-- `analysis_version` — implementation of feature algorithms. Bump when formulas or defaults change in a way that alters numeric outputs.
+- The complete raw STFT / spectrogram matrix
+- Full-resolution FFT bins (only peak list + downsampled summaries)
+- Full-resolution time series (curves capped by `max_timeseries_points`)
 
-Forward compatibility: unknown fields should be preserved by consumers; readers must tolerate missing optional sections introduced in later versions.
+## Versioning / forward compatibility
 
-## Milestone 1 models
+- Bump `schema_version` on breaking JSON shape changes.
+- Bump `analysis_version` when algorithms or defaults change numeric outputs.
+- Empty objects (`pitch`, `harmonics`, …) reserve slots for later milestones.
+- Consumers should ignore unknown fields and tolerate missing optional sections.
 
-### `SourceMetadata`
+## Source models (Milestone 1+)
 
-Identity and technical metadata of an audio file after probing:
-
-- `filename`, `path`, `content_hash` (SHA-256), `file_size_bytes`
-- `container`, `codec`, `duration_seconds`
-- `native_sample_rate`, `analysis_sample_rate`, `channels`, `bit_depth`, `bitrate`
-- `probe_backend` (`soundfile` | `ffprobe` | `hybrid`)
-
-### `LoadedAudio`
-
-In-memory decode result (not serialized into the fingerprint as raw samples):
-
-- samples as `float32` array shaped `(n_samples,)` or `(n_samples, channels)`
-- sample rate actually used for analysis
-- optional quality flags from load-time checks
-
-### Preliminary vector (later)
-
-A versioned preliminary comparison vector will be documented when introduced. Dataset-level normalization is deferred until a real corpus exists — do not mix differently scaled features into a “final” similarity embedding blindly.
+`SourceMetadata`, `AnalysisConfigSnapshot`, `QualityMetrics`, `ProbeResult` remain the probe/identity layer.

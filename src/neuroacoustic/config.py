@@ -27,8 +27,8 @@ DEFAULT_CONFIG_PATH = _repo_root() / "config" / "default.toml"
 
 class ProjectConfig(BaseModel):
     name: str = "neuroacoustic-lab"
-    analysis_version: str = "0.1.0"
-    schema_version: str = "0.1.0"
+    analysis_version: str = "0.2.0"
+    schema_version: str = "0.2.0"
 
 
 class PathsConfig(BaseModel):
@@ -68,10 +68,22 @@ class ProbeConfig(BaseModel):
 
 
 class AnalysisConfig(BaseModel):
-    """Reserved frame parameters for Milestone 2+."""
+    """Frame-level analysis parameters (Milestone 2)."""
 
-    frame_length: int | None = None
-    hop_length: int | None = None
+    n_fft: int = 2048
+    hop_length: int = 512
+    win_length: int = 2048
+    frame_length: int | None = None  # optional alias; prefer win_length
+    rolloff_percentile: float = 0.85
+    n_contrast_bands: int = 6
+    fft_peak_count: int = 8
+    max_timeseries_points: int = 256
+    fft_summary_bins: int = 128
+    amplitude_floor: float = 1.0e-12
+    vector_version: str = "0.2.0-preliminary"
+
+    def effective_win_length(self) -> int:
+        return int(self.win_length or self.frame_length or self.n_fft)
 
 
 class AppConfig(BaseModel):
@@ -131,22 +143,20 @@ def _apply_env_overrides(raw: dict[str, Any]) -> dict[str, Any]:
 
 
 def load_config(path: Path | str | None = None, *, resolve: bool = True) -> AppConfig:
-    """Load configuration from TOML and environment overrides.
-
-    Parameters
-    ----------
-    path:
-        Explicit config path. If omitted, uses ``NEUROACOUSTIC_CONFIG`` or
-        ``config/default.toml``.
-    resolve:
-        When True, resolve relative data paths against the repository root.
-    """
+    """Load configuration from TOML and environment overrides."""
     env_path = os.environ.get("NEUROACOUSTIC_CONFIG")
     config_path = Path(path or env_path or DEFAULT_CONFIG_PATH).expanduser()
     if not config_path.is_absolute():
         config_path = (Path.cwd() / config_path).resolve()
 
     raw = _load_toml(config_path) if config_path.exists() else {}
+    # Map legacy frame_length key onto win_length / n_fft if present.
+    analysis = raw.setdefault("analysis", {})
+    if "frame_length" in analysis and "win_length" not in analysis:
+        analysis["win_length"] = analysis["frame_length"]
+    if "frame_length" in analysis and "n_fft" not in analysis:
+        analysis["n_fft"] = analysis["frame_length"]
+
     raw = _apply_env_overrides(raw)
     cfg = AppConfig.model_validate({**raw, "config_path": config_path})
     if resolve:

@@ -48,6 +48,7 @@ tests/fixtures/*
 *.png
 *.svg
 *.pdf
+*.fingerprint.json
 plots/
 artifacts/
 

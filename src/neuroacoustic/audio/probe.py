@@ -13,10 +13,10 @@ import soundfile as sf
 from neuroacoustic.config import AppConfig
 from neuroacoustic.exceptions import AudioValidationError, DependencyError
 from neuroacoustic.fingerprint.models import (
-    AnalysisConfigSnapshot,
     ProbeBackend,
     ProbeResult,
     SourceMetadata,
+    build_analysis_config_snapshot,
 )
 from neuroacoustic.logging import get_logger
 
@@ -287,14 +287,8 @@ def probe_audio(path: Path | str, config: AppConfig) -> ProbeResult:
         warnings=warnings,
     )
 
-    analysis_config = AnalysisConfigSnapshot(
-        schema_version=config.project.schema_version,
-        analysis_version=config.project.analysis_version,
-        analysis_sample_rate=config.audio.analysis_sample_rate,
-        silence_peak_threshold=config.audio.silence_peak_threshold,
-        silence_sample_threshold=config.audio.silence_sample_threshold,
-        clipping_threshold=config.audio.clipping_threshold,
-        config_path=str(config.config_path) if config.config_path else None,
+    analysis_config = build_analysis_config_snapshot(
+        config, analysis_sample_rate=analysis_rate
     )
 
     logger.info(

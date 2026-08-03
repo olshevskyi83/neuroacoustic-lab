@@ -97,10 +97,38 @@ def test_probe_missing_file_nonzero(tmp_path: Path) -> None:
     assert result.exit_code != 0
 
 
-def test_analyze_not_implemented(fixtures_dir: Path) -> None:
-    result = runner.invoke(app, ["analyze", str(fixtures_dir / "sine_440hz.wav")])
-    assert result.exit_code == 2
-    assert "Milestone 1" in result.stdout or "Milestone 1" in result.stderr
+def test_analyze_runs(fixtures_dir: Path, tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "analyze",
+            str(fixtures_dir / "sine_440hz.wav"),
+            "--output-dir",
+            str(tmp_path),
+            "--no-plots",
+        ],
+    )
+    assert result.exit_code == 0, result.stdout + result.stderr
+    assert "fingerprint" in result.stdout.lower() or "centroid" in result.stdout.lower()
+
+
+def test_analyze_json(fixtures_dir: Path, tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "analyze",
+            str(fixtures_dir / "white_noise.wav"),
+            "--output-dir",
+            str(tmp_path),
+            "--no-plots",
+            "--json",
+        ],
+    )
+    assert result.exit_code == 0, result.stdout + result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["schema_version"] == "0.2.0"
+    assert "spectral" in payload
+    assert "energy" in payload
 
 
 def test_db_list_not_implemented() -> None:
