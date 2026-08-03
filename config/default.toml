@@ -1,0 +1,50 @@
+# NeuroAcoustic Lab — default analysis configuration (Milestone 1)
+
+[project]
+name = "neuroacoustic-lab"
+analysis_version = "0.1.0"
+schema_version = "0.1.0"
+
+[paths]
+input_dir = "data/input"
+output_dir = "data/output"
+database = "data/db/neuroacoustic.sqlite"
+
+[logging]
+level = "INFO"
+# Structured JSON logs when true; human-readable Rich output when false
+json_logs = false
+
+[audio]
+# Supported extensions (lowercase, without leading dot)
+supported_extensions = ["wav", "flac", "aiff", "aif", "mp3"]
+# Formats decoded directly via soundfile
+soundfile_extensions = ["wav", "flac", "aiff", "aif"]
+# Formats that require FFmpeg fallback decoding
+ffmpeg_extensions = ["mp3"]
+
+# When null/omitted, preserve the native sample rate for analysis.
+# Set to an integer (Hz) to resample before analysis.
+# analysis_sample_rate is overridable via CLI / env.
+# analysis_sample_rate = 44100
+
+# Peak absolute amplitude below this threshold is treated as near-silence
+silence_peak_threshold = 1.0e-6
+# Fraction of samples near zero used for silence_ratio quality metric
+silence_sample_threshold = 1.0e-4
+# Peak absolute amplitude at or above this is counted toward clipping_ratio
+clipping_threshold = 0.999
+
+# Maximum duration (seconds) accepted without --force (safety for MVP)
+max_duration_seconds = 3600.0
+# Minimum duration (seconds); shorter files raise a validation error
+min_duration_seconds = 0.01
+
+[probe]
+# Prefer ffprobe when available for container/codec metadata
+prefer_ffprobe = true
+
+[analysis]
+# Frame / hop defaults reserved for Milestone 2+
+# frame_length = 2048
+# hop_length = 512
