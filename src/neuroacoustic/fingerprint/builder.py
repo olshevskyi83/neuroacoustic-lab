@@ -5,21 +5,29 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from neuroacoustic.analysis.energy import EnergyFeatures
+from neuroacoustic.analysis.envelope import EnvelopeFeatures
 from neuroacoustic.analysis.harmonics import HarmonicFeatures
 from neuroacoustic.analysis.pitch import PitchFeatures
+from neuroacoustic.analysis.reverb import ReverbFeatures
+from neuroacoustic.analysis.rhythm import RhythmFeatures
 from neuroacoustic.analysis.spectral import SpectralFeatures
 from neuroacoustic.analysis.spectrum import FftSummaryData, StftResult
 from neuroacoustic.analysis.stats import DistributionStats, TimeSeriesSummary
+from neuroacoustic.analysis.stereo import StereoFeatures
 from neuroacoustic.fingerprint.models import (
     AcousticFingerprint,
     ArtifactPaths,
     EnergySection,
+    EnvelopeSection,
     FftPeak,
     FftSummary,
     HarmonicsSection,
     PitchSection,
     QualityMetrics,
+    ReverberationSection,
+    RhythmSection,
     SpectralSection,
+    StereoSection,
     StftSummary,
     build_analysis_config_snapshot,
 )
@@ -40,6 +48,10 @@ def build_fingerprint(
     energy: EnergyFeatures,
     pitch: PitchFeatures,
     harmonics: HarmonicFeatures,
+    envelope: EnvelopeFeatures,
+    stereo: StereoFeatures,
+    rhythm: RhythmFeatures,
+    reverb: ReverbFeatures,
     artifacts: ArtifactPaths | None = None,
 ) -> AcousticFingerprint:
     """Assemble the versioned fingerprint (no raw STFT / pitch matrices)."""
@@ -48,6 +60,10 @@ def build_fingerprint(
     warnings.extend(energy.warnings)
     warnings.extend(pitch.warnings)
     warnings.extend(harmonics.warnings)
+    warnings.extend(envelope.warnings)
+    warnings.extend(stereo.warnings)
+    warnings.extend(rhythm.warnings)
+    warnings.extend(reverb.warnings)
 
     quality = QualityMetrics(
         clipping_ratio=loaded.quality.clipping_ratio,
@@ -171,12 +187,86 @@ def build_fingerprint(
         frames_analyzed=harmonics.frames_analyzed,
     )
 
+    envelope_section = EnvelopeSection(
+        onset_time_s=envelope.onset_time_s,
+        attack_time_s=envelope.attack_time_s,
+        decay_time_s=envelope.decay_time_s,
+        sustain_level=envelope.sustain_level,
+        release_time_s=envelope.release_time_s,
+        peak_envelope=envelope.peak_amplitude,
+        confidence=envelope.confidence,
+        warnings=list(envelope.warnings),
+        envelope_rms=envelope.envelope_distribution,
+        envelope_curve=TimeSeriesSummary(
+            times_seconds=envelope.envelope_curve_times,
+            values=list(envelope.envelope_curve_values),
+            unit="linear_rms",
+            description="Downsampled smoothed RMS envelope",
+        ),
+        note=envelope.note,
+    )
+
+    stereo_section = StereoSection(
+        channel_count=stereo.channel_count,
+        is_mono=stereo.is_mono,
+        left_rms=stereo.left_rms,
+        right_rms=stereo.right_rms,
+        correlation=stereo.correlation,
+        mid_energy=stereo.mid_energy,
+        side_energy=stereo.side_energy,
+        side_to_mid_ratio=stereo.side_to_mid_ratio,
+        stereo_width_estimate=stereo.stereo_width_estimate,
+        confidence=stereo.confidence,
+        warnings=list(stereo.warnings),
+        note=stereo.note,
+    )
+
+    rhythm_section = RhythmSection(
+        onset_strength_mean=rhythm.onset_strength_mean,
+        onset_strength_std=rhythm.onset_strength_std,
+        onset_event_count=rhythm.onset_event_count,
+        tempo_bpm=rhythm.tempo_bpm,
+        beat_times_s=list(rhythm.beat_times_s),
+        beat_count=rhythm.beat_count,
+        beat_interval_cv=rhythm.beat_interval_cv,
+        tempo_periodicity=rhythm.tempo_periodicity,
+        confidence=rhythm.confidence,
+        warnings=list(rhythm.warnings),
+        onset_strength=rhythm.onset_strength_distribution,
+        onset_strength_curve=TimeSeriesSummary(
+            times_seconds=rhythm.onset_curve_times,
+            values=list(rhythm.onset_curve_values),
+            unit="onset_strength",
+            description="Downsampled onset-strength envelope",
+        ),
+        note=rhythm.note,
+    )
+
+    freq_range = None
+    if reverb.analyzed_frequency_range_hz is not None:
+        freq_range = [float(reverb.analyzed_frequency_range_hz[0]), float(reverb.analyzed_frequency_range_hz[1])]
+
+    reverb_section = ReverberationSection(
+        tail_decay_t60_estimate_seconds=reverb.tail_decay_t60_estimate_seconds,
+        decay_slope_db_per_s=reverb.decay_slope_db_per_s,
+        fit_r_squared=reverb.fit_r_squared,
+        fit_db_range=reverb.fit_db_range,
+        analyzed_frequency_range_hz=freq_range,
+        confidence=reverb.confidence,
+        warnings=list(reverb.warnings),
+        note=reverb.note,
+    )
+
     vector_meta = build_preliminary_vector(
         fft=fft,
         spectral=spectral,
         energy=energy,
         pitch=pitch,
         harmonics=harmonics,
+        envelope=envelope,
+        stereo=stereo,
+        rhythm=rhythm,
+        reverb=reverb,
         sample_rate=loaded.analysis_sample_rate,
         analysis=config.analysis,
     )
@@ -193,6 +283,10 @@ def build_fingerprint(
         pitch=pitch_section,
         harmonics=harmonics_section,
         energy=energy_section,
+        envelope=envelope_section,
+        stereo=stereo_section,
+        rhythm=rhythm_section,
+        reverberation=reverb_section,
         vector=list(vector_meta.values),
         vector_meta=vector_meta,
         artifacts=artifacts or ArtifactPaths(),

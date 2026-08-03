@@ -4,7 +4,7 @@ Features with incompatible physical units are NOT mixed into a final similarity
 embedding. This module builds an explicitly versioned **preliminary** vector with
 heuristic per-feature scales. Dataset-level normalization is deferred.
 
-Vector ordering (``vector_version`` = ``0.3.0-preliminary``)
+Vector ordering (``vector_version`` = ``0.4.0-preliminary``)
 ------------------------------------------------------------
 Indices 0–11 preserve the Milestone 2 spectral/energy prefix and scaling:
 
@@ -33,15 +33,36 @@ Milestone 3 appends (null pitch/harmonics → 0.0, never a fake 0 Hz feature):
 19 harmonic_energy_fraction_estimate  linear E_harm/E_band in [0,1]
 20 inharmonicity_estimate_norm    min(inharmonicity_est, 1.0)
 21 harmonics_confidence           heuristic harmonics confidence 0–1
+
+Milestone 4A appends (null → 0.0; mono width/corr → 0.0; null tempo → 0.0):
+
+22 attack_time_norm               attack_s / 2.0 → [0,1]
+23 decay_time_norm                decay_s / 2.0 → [0,1]
+24 sustain_level                  relative sustain (already ~0–1)
+25 release_time_norm              release_s / 2.0 → [0,1]
+26 envelope_confidence            0–1
+27 stereo_correlation_norm        (corr+1)/2 → [0,1]; mono/undefined → 0.0
+28 stereo_width_estimate          0–1; mono/undefined → 0.0
+29 side_to_mid_ratio_norm         min(ratio, 5)/5 → [0,1]; undefined → 0.0
+30 is_stereo                      1.0 if stereo else 0.0
+31 tempo_bpm_norm                 tempo/200 → [0,1]; null tempo → 0.0
+32 onset_strength_mean_norm       min(mean, 10)/10 → [0,1]
+33 rhythm_confidence              0–1
+34 tail_decay_t60_norm            min(t60, 10)/10 → [0,1]; null → 0.0
+35 reverb_confidence              0–1
 """
 
 from __future__ import annotations
 
 from neuroacoustic.analysis.energy import EnergyFeatures
+from neuroacoustic.analysis.envelope import EnvelopeFeatures
 from neuroacoustic.analysis.harmonics import HarmonicFeatures
 from neuroacoustic.analysis.pitch import PitchFeatures
+from neuroacoustic.analysis.reverb import ReverbFeatures
+from neuroacoustic.analysis.rhythm import RhythmFeatures
 from neuroacoustic.analysis.spectral import SpectralFeatures
 from neuroacoustic.analysis.spectrum import FftSummaryData
+from neuroacoustic.analysis.stereo import StereoFeatures
 from neuroacoustic.config import AnalysisConfig
 from neuroacoustic.fingerprint.models import PreliminaryVector
 
@@ -65,10 +86,14 @@ def build_preliminary_vector(
     energy: EnergyFeatures,
     pitch: PitchFeatures | None = None,
     harmonics: HarmonicFeatures | None = None,
+    envelope: EnvelopeFeatures | None = None,
+    stereo: StereoFeatures | None = None,
+    rhythm: RhythmFeatures | None = None,
+    reverb: ReverbFeatures | None = None,
     sample_rate: int,
     analysis: AnalysisConfig,
 ) -> PreliminaryVector:
-    """Assemble preliminary vector: M2 prefix + optional M3 pitch/harmonic append."""
+    """Assemble preliminary vector: M2+M3 prefix + optional M4A append."""
     nyquist = max(sample_rate / 2.0, 1.0)
     labels = [
         "peak_freq_norm",
@@ -93,6 +118,20 @@ def build_preliminary_vector(
         "harmonic_energy_fraction_estimate",
         "inharmonicity_estimate_norm",
         "harmonics_confidence",
+        "attack_time_norm",
+        "decay_time_norm",
+        "sustain_level",
+        "release_time_norm",
+        "envelope_confidence",
+        "stereo_correlation_norm",
+        "stereo_width_estimate",
+        "side_to_mid_ratio_norm",
+        "is_stereo",
+        "tempo_bpm_norm",
+        "onset_strength_mean_norm",
+        "rhythm_confidence",
+        "tail_decay_t60_norm",
+        "reverb_confidence",
     ]
 
     peak_f = fft.peak_frequency_hz
@@ -111,7 +150,7 @@ def build_preliminary_vector(
         _n(energy.estimated_dynamic_range_db, 120.0),
     ]
 
-    f0_max = float(analysis.f0_max_hz) if pitch is not None else float(analysis.f0_max_hz)
+    f0_max = float(analysis.f0_max_hz)
     if pitch is None:
         values.extend([0.0] * 5)
     else:
@@ -135,6 +174,56 @@ def build_preliminary_vector(
                 _finite(float(harmonics.harmonic_energy_fraction_estimate or 0.0)),
                 _finite(min(float(harmonics.inharmonicity_estimate or 0.0), 1.0)),
                 _finite(float(harmonics.confidence or 0.0)),
+            ]
+        )
+
+    # Milestone 4A append (indices 22–35)
+    if envelope is None:
+        values.extend([0.0] * 5)
+    else:
+        values.extend(
+            [
+                _n(envelope.attack_time_s, 2.0),
+                _n(envelope.decay_time_s, 2.0),
+                _finite(float(envelope.sustain_level or 0.0)),
+                _n(envelope.release_time_s, 2.0),
+                _finite(float(envelope.confidence or 0.0)),
+            ]
+        )
+
+    if stereo is None or stereo.is_mono:
+        values.extend([0.0, 0.0, 0.0, 0.0])
+    else:
+        corr_norm = 0.0
+        if stereo.correlation is not None:
+            corr_norm = _finite(0.5 * (float(stereo.correlation) + 1.0))
+        values.extend(
+            [
+                corr_norm,
+                _finite(float(stereo.stereo_width_estimate or 0.0)),
+                _n(stereo.side_to_mid_ratio, 5.0),
+                1.0,
+            ]
+        )
+
+    if rhythm is None:
+        values.extend([0.0, 0.0, 0.0])
+    else:
+        values.extend(
+            [
+                _n(rhythm.tempo_bpm, 200.0),
+                _n(rhythm.onset_strength_mean, 10.0),
+                _finite(float(rhythm.confidence or 0.0)),
+            ]
+        )
+
+    if reverb is None:
+        values.extend([0.0, 0.0])
+    else:
+        values.extend(
+            [
+                _n(reverb.tail_decay_t60_estimate_seconds, 10.0),
+                _finite(float(reverb.confidence or 0.0)),
             ]
         )
 

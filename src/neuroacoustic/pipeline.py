@@ -1,4 +1,4 @@
-"""End-to-end analysis pipeline (Milestone 3)."""
+"""End-to-end analysis pipeline (Milestone 4A)."""
 
 from __future__ import annotations
 
@@ -8,11 +8,15 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from neuroacoustic.analysis.energy import analyze_energy
+from neuroacoustic.analysis.envelope import compute_envelope_features
 from neuroacoustic.analysis.harmonics import analyze_harmonics
 from neuroacoustic.analysis.pitch import analyze_pitch
+from neuroacoustic.analysis.reverb import compute_reverb_features
+from neuroacoustic.analysis.rhythm import compute_rhythm_features
 from neuroacoustic.analysis.spectral import analyze_spectral
 from neuroacoustic.analysis.spectrum import compute_fft_summary, compute_stft
 from neuroacoustic.analysis.stats import to_mono
+from neuroacoustic.analysis.stereo import compute_stereo_features
 from neuroacoustic.audio.loader import LoadedAudio, load_audio
 from neuroacoustic.config import AppConfig
 from neuroacoustic.exceptions import AudioValidationError, NeuroAcousticError
@@ -62,7 +66,7 @@ def run_pipeline(
     plots: bool = True,
     force: bool = False,
 ) -> PipelineResult:
-    """Load audio, run spectral/energy/pitch/harmonic analysis, write JSON/plots."""
+    """Load audio, run analysis through M4A sections, write JSON/plots."""
     audio_path = Path(path)
     out_dir = Path(output_dir or config.paths.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -88,6 +92,10 @@ def run_pipeline(
     energy = analyze_energy(mono, sr, config.analysis)
     pitch = analyze_pitch(mono, sr, config.analysis)
     harmonics = analyze_harmonics(stft, pitch, config.analysis)
+    envelope = compute_envelope_features(mono, sr, config.analysis)
+    stereo = compute_stereo_features(loaded.samples, sr, config.analysis)
+    rhythm = compute_rhythm_features(mono, sr, config.analysis)
+    reverb = compute_reverb_features(mono, sr, config.analysis)
 
     stem = _stem_safe(loaded.source.filename)
     content_short = loaded.source.content_hash[:12]
@@ -137,6 +145,10 @@ def run_pipeline(
         energy=energy,
         pitch=pitch,
         harmonics=harmonics,
+        envelope=envelope,
+        stereo=stereo,
+        rhythm=rhythm,
+        reverb=reverb,
         artifacts=artifacts,
     )
 

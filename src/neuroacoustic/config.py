@@ -27,8 +27,8 @@ DEFAULT_CONFIG_PATH = _repo_root() / "config" / "default.toml"
 
 class ProjectConfig(BaseModel):
     name: str = "neuroacoustic-lab"
-    analysis_version: str = "0.3.0"
-    schema_version: str = "0.3.0"
+    analysis_version: str = "0.4.0"
+    schema_version: str = "0.4.0"
 
 
 class PathsConfig(BaseModel):
@@ -68,7 +68,7 @@ class ProbeConfig(BaseModel):
 
 
 class AnalysisConfig(BaseModel):
-    """Frame-level analysis parameters (Milestone 2–3)."""
+    """Frame-level analysis parameters (Milestone 2–4A)."""
 
     n_fft: int = 2048
     hop_length: int = 512
@@ -93,7 +93,28 @@ class AnalysisConfig(BaseModel):
     max_harmonics: int = 12
     harmonic_search_width_fraction: float = 0.10
     harmonic_rel_amp_threshold: float = 0.05
-    vector_version: str = "0.3.0-preliminary"
+    # Envelope / ADSR estimates
+    envelope_smooth_frames: int = 5
+    envelope_onset_ratio: float = 0.1
+    envelope_attack_high_ratio: float = 0.9
+    envelope_sustain_start: float = 0.35
+    envelope_sustain_end: float = 0.75
+    envelope_release_ratio: float = 0.1
+    # Rhythm
+    min_tempo_bpm: float = 40.0
+    max_tempo_bpm: float = 240.0
+    min_onset_events_for_tempo: int = 4
+    min_duration_for_tempo_seconds: float = 0.5
+    # Evidence gate: enough placed beats + stable intervals + onset periodicity
+    min_beats_for_tempo: int = 3
+    max_beat_interval_cv: float = 0.35
+    # Normalized onset-envelope autocorr at one beat-period lag (see rhythm.py)
+    min_tempo_periodicity: float = 0.30
+    # File-tail decay / reverberation heuristic
+    decay_fit_db_range: float = 20.0
+    decay_min_r2: float = 0.85
+    decay_min_duration_seconds: float = 0.05
+    vector_version: str = "0.4.0-preliminary"
 
     def effective_win_length(self) -> int:
         return int(self.win_length or self.frame_length or self.n_fft)

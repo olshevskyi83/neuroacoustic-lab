@@ -71,6 +71,15 @@ class AnalysisConfigSnapshot(BaseModel):
     max_harmonics: int | None = None
     harmonic_search_width_fraction: float | None = None
     harmonic_rel_amp_threshold: float | None = None
+    # Milestone 4A
+    envelope_smooth_frames: int | None = None
+    min_tempo_bpm: float | None = None
+    max_tempo_bpm: float | None = None
+    min_beats_for_tempo: int | None = None
+    max_beat_interval_cv: float | None = None
+    min_tempo_periodicity: float | None = None
+    decay_fit_db_range: float | None = None
+    decay_min_r2: float | None = None
 
 
 def build_analysis_config_snapshot(
@@ -103,6 +112,14 @@ def build_analysis_config_snapshot(
         max_harmonics=config.analysis.max_harmonics,
         harmonic_search_width_fraction=config.analysis.harmonic_search_width_fraction,
         harmonic_rel_amp_threshold=config.analysis.harmonic_rel_amp_threshold,
+        envelope_smooth_frames=config.analysis.envelope_smooth_frames,
+        min_tempo_bpm=config.analysis.min_tempo_bpm,
+        max_tempo_bpm=config.analysis.max_tempo_bpm,
+        min_beats_for_tempo=config.analysis.min_beats_for_tempo,
+        max_beat_interval_cv=config.analysis.max_beat_interval_cv,
+        min_tempo_periodicity=config.analysis.min_tempo_periodicity,
+        decay_fit_db_range=config.analysis.decay_fit_db_range,
+        decay_min_r2=config.analysis.decay_min_r2,
     )
 
 
@@ -291,6 +308,136 @@ class HarmonicsSection(BaseModel):
     )
 
 
+class EnvelopeSection(BaseModel):
+    """Smoothed RMS envelope and ADSR-like *estimates* (Milestone 4A)."""
+
+    onset_time_s: float | None = Field(
+        default=None, description="First time envelope reaches onset_ratio * peak (s)"
+    )
+    attack_time_s: float | None = Field(
+        default=None, description="Onset → attack_high_ratio * peak (s); estimate"
+    )
+    decay_time_s: float | None = Field(
+        default=None, description="Peak → sustain absolute level (s); estimate"
+    )
+    sustain_level: float | None = Field(
+        default=None,
+        description="Median mid-file envelope / peak (relative, ~0–1); estimate",
+    )
+    release_time_s: float | None = Field(
+        default=None, description="Late fall from mid-sustain to release_ratio * peak (s)"
+    )
+    peak_envelope: float | None = None
+    confidence: float | None = None
+    warnings: list[str] = Field(default_factory=list)
+    envelope_rms: DistributionStats
+    envelope_curve: TimeSeriesSummary | None = None
+    note: str = (
+        "ADSR fields describe envelope shape only. They are not a recovered "
+        "synthesizer ADSR program."
+    )
+
+
+class StereoSection(BaseModel):
+    """Inter-channel stereo measurements (Milestone 4A)."""
+
+    channel_count: int = 1
+    is_mono: bool = True
+    left_rms: float | None = None
+    right_rms: float | None = None
+    correlation: float | None = Field(
+        default=None, description="Pearson correlation between L and R in [-1, 1]"
+    )
+    mid_energy: float | None = Field(
+        default=None, description="mean(((L+R)/2)^2)"
+    )
+    side_energy: float | None = Field(
+        default=None, description="mean(((L-R)/2)^2)"
+    )
+    side_to_mid_ratio: float | None = Field(
+        default=None,
+        description="side_energy / max(mid_energy, floor); dimensionless",
+    )
+    stereo_width_estimate: float | None = Field(
+        default=None,
+        description=(
+            "clip(0.5*(1-correlation), 0, 1): correlation/phase-opposition "
+            "heuristic — not a complete perceptual stereo-width metric; "
+            "null for mono / silent channel"
+        ),
+    )
+    confidence: float | None = None
+    warnings: list[str] = Field(default_factory=list)
+    note: str = (
+        "Mono files leave correlation/width null (not fabricated). "
+        "Width uses the documented 0.5*(1-corr) correlation/phase-opposition "
+        "heuristic, not a full perceptual stereo-width metric."
+    )
+
+
+class RhythmSection(BaseModel):
+    """Onset strength and optional tempo/beats (Milestone 4A)."""
+
+    onset_strength_mean: float | None = None
+    onset_strength_std: float | None = None
+    onset_event_count: int = 0
+    tempo_bpm: float | None = Field(
+        default=None,
+        description="Estimated tempo in BPM; null when evidence is insufficient",
+    )
+    beat_times_s: list[float] = Field(default_factory=list)
+    beat_count: int = 0
+    beat_interval_cv: float | None = Field(
+        default=None,
+        description="Coefficient of variation of successive beat intervals; null if <2 intervals",
+    )
+    tempo_periodicity: float | None = Field(
+        default=None,
+        description=(
+            "Normalized onset-envelope autocorrelation at one beat-period lag R(τ); "
+            "primary periodicity evidence for the reliability gate"
+        ),
+    )
+    confidence: float | None = None
+    warnings: list[str] = Field(default_factory=list)
+    onset_strength: DistributionStats
+    onset_strength_curve: TimeSeriesSummary | None = None
+    note: str = (
+        "Tempo may be off by ×2 (half-/double-time). Null tempo means "
+        "insufficient rhythmic evidence — not a missing zero BPM. "
+        "Accepted only when R(τ) ≥ min_tempo_periodicity with enough stable beats."
+    )
+
+
+class ReverberationSection(BaseModel):
+    """File-tail decay heuristic (Milestone 4A) — not room RT60."""
+
+    tail_decay_t60_estimate_seconds: float | None = Field(
+        default=None,
+        description=(
+            "Extrapolated time for 60 dB drop of fitted energy-envelope slope; "
+            "file-tail heuristic, NOT calibrated room RT60"
+        ),
+    )
+    decay_slope_db_per_s: float | None = Field(
+        default=None, description="Fitted energy-envelope slope (10*log10 energy) in dB/s"
+    )
+    fit_r_squared: float | None = None
+    fit_db_range: float | None = Field(
+        default=None, description="Measured post-peak energy drop used in the fit (dB)"
+    )
+    analyzed_frequency_range_hz: list[float] | None = Field(
+        default=None,
+        description="Broadband analysis band [low, high] Hz (fullband envelope)",
+    )
+    confidence: float | None = None
+    warnings: list[str] = Field(default_factory=list)
+    note: str = (
+        "Distinguishes file-tail decay from room reverberation. "
+        "Do not treat as exact RT60 for arbitrary mixed recordings."
+    )
+
+
 class ArtifactPaths(BaseModel):
     fingerprint_json: str | None = None
     waveform_png: str | None = None
@@ -308,13 +455,14 @@ class PreliminaryVector(BaseModel):
     note: str = (
         "Preliminary unnormalized / heuristically scaled features. "
         "Dataset-level normalization will be introduced when a real corpus exists. "
-        "Ordering: indices 0–11 are the Milestone 2 spectral/energy prefix "
-        "(unchanged scaling); indices 12+ are Milestone 3 pitch/harmonic appends."
+        "Indices 0–11: M2 spectral/energy (unchanged). "
+        "Indices 12–21: M3 pitch/harmonics (unchanged). "
+        "Indices 22+: M4A envelope/stereo/rhythm/decay appends."
     )
 
 
 class AcousticFingerprint(BaseModel):
-    """Versioned acoustic fingerprint document (Milestone 3)."""
+    """Versioned acoustic fingerprint document (Milestone 4A)."""
 
     schema_version: str
     analysis_version: str
@@ -325,10 +473,10 @@ class AcousticFingerprint(BaseModel):
     pitch: PitchSection
     harmonics: HarmonicsSection
     energy: EnergySection
-    envelope: dict[str, Any] = Field(default_factory=dict)
-    stereo: dict[str, Any] = Field(default_factory=dict)
-    rhythm: dict[str, Any] = Field(default_factory=dict)
-    reverberation: dict[str, Any] = Field(default_factory=dict)
+    envelope: EnvelopeSection
+    stereo: StereoSection
+    rhythm: RhythmSection
+    reverberation: ReverberationSection
     vector: list[float] = Field(default_factory=list)
     vector_meta: PreliminaryVector | None = None
     artifacts: ArtifactPaths = Field(default_factory=ArtifactPaths)

@@ -248,7 +248,7 @@ def analyze_cmd(
         if database is not None:
             err_console.print(
                 "[yellow]warning:[/yellow] --database is accepted but SQLite "
-                "persistence is deferred to Milestone 4; writing JSON only."
+                "persistence is deferred past Milestone 4A; writing JSON only."
             )
         setup_logging(cfg.logging.level, json_logs=cfg.logging.json_logs)
         result = run_pipeline(
@@ -294,7 +294,15 @@ def analyze_cmd(
         ("crest_factor", str(fp.energy.crest_factor)),
         ("zcr", str(fp.energy.zero_crossing_rate)),
         ("estimated_dynamic_range_db", str(fp.energy.estimated_dynamic_range_db)),
+        ("attack_time_s", str(fp.envelope.attack_time_s)),
+        ("sustain_level", str(fp.envelope.sustain_level)),
+        ("stereo_width", str(fp.stereo.stereo_width_estimate)),
+        ("correlation", str(fp.stereo.correlation)),
+        ("tempo_bpm", str(fp.rhythm.tempo_bpm)),
+        ("onset_events", str(fp.rhythm.onset_event_count)),
+        ("tail_decay_t60_s", str(fp.reverberation.tail_decay_t60_estimate_seconds)),
         ("vector_len", str(len(fp.vector))),
+        ("vector_version", str(fp.vector_meta.version if fp.vector_meta else "—")),
     ]
     for key, value in rows:
         table.add_row(key, value)

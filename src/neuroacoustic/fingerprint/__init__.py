@@ -1,33 +1,29 @@
-"""Fingerprint package — models and builders."""
+"""Fingerprint schema and builders."""
 
+from neuroacoustic.fingerprint.builder import build_fingerprint
 from neuroacoustic.fingerprint.models import (
     AcousticFingerprint,
-    AnalysisConfigSnapshot,
     ArtifactPaths,
-    EnergySection,
+    EnvelopeSection,
     HarmonicsSection,
     PitchSection,
     PreliminaryVector,
-    ProbeBackend,
-    ProbeResult,
-    QualityMetrics,
-    SourceMetadata,
-    SpectralSection,
-    build_analysis_config_snapshot,
+    ReverberationSection,
+    RhythmSection,
+    StereoSection,
 )
+from neuroacoustic.fingerprint.normalization import build_preliminary_vector
 
 __all__ = [
     "AcousticFingerprint",
-    "AnalysisConfigSnapshot",
     "ArtifactPaths",
-    "EnergySection",
+    "EnvelopeSection",
     "HarmonicsSection",
     "PitchSection",
     "PreliminaryVector",
-    "ProbeBackend",
-    "ProbeResult",
-    "QualityMetrics",
-    "SourceMetadata",
-    "SpectralSection",
-    "build_analysis_config_snapshot",
+    "ReverberationSection",
+    "RhythmSection",
+    "StereoSection",
+    "build_fingerprint",
+    "build_preliminary_vector",
 ]

@@ -1,9 +1,9 @@
-# NeuroAcoustic Lab — default analysis configuration (Milestone 3)
+# NeuroAcoustic Lab — default analysis configuration (Milestone 4A)
 
 [project]
 name = "neuroacoustic-lab"
-analysis_version = "0.3.0"
-schema_version = "0.3.0"
+analysis_version = "0.4.0"
+schema_version = "0.4.0"
 
 [paths]
 input_dir = "data/input"
@@ -19,9 +19,6 @@ supported_extensions = ["wav", "flac", "aiff", "aif", "mp3"]
 soundfile_extensions = ["wav", "flac", "aiff", "aif"]
 ffmpeg_extensions = ["mp3"]
 
-# When omitted, preserve the native sample rate for analysis.
-# analysis_sample_rate = 44100
-
 silence_peak_threshold = 1.0e-6
 silence_sample_threshold = 1.0e-4
 clipping_threshold = 0.999
@@ -32,7 +29,6 @@ min_duration_seconds = 0.01
 prefer_ffprobe = true
 
 [analysis]
-# STFT / framing (samples at the analysis sample rate)
 n_fft = 2048
 hop_length = 512
 win_length = 2048
@@ -46,23 +42,38 @@ amplitude_floor = 1.0e-12
 # Pitch (librosa pYIN)
 f0_min_hz = 65.0
 f0_max_hz = 2000.0
-# pYIN frame length in samples (independent of STFT n_fft when needed)
 f0_frame_length = 2048
-# Soft confidence warning threshold (high-confidence voicing)
 voiced_prob_threshold = 0.5
-# Hard floor: frames with voiced_prob below this are treated as unvoiced for aggregates
 voiced_prob_floor = 0.1
-# Warn when fewer voiced frames than this are available
 min_voiced_frames = 3
 
 # Harmonics
 max_harmonics = 12
-# Relative search half-width around n*F0 as a fraction of the *target*
-# frequency n*F0 (capped below 0.45*F0 so neighbors are not merged).
-# 0.10 catches resolvable detuning of ~1 bin while preserving harmonic separation.
 harmonic_search_width_fraction = 0.10
-# Minimum peak magnitude relative to the local fundamental peak
 harmonic_rel_amp_threshold = 0.05
 
-# Preliminary comparison-vector version (M3 appends pitch/harmonic dims)
-vector_version = "0.3.0-preliminary"
+# Envelope / ADSR estimates (Milestone 4A)
+envelope_smooth_frames = 5
+envelope_onset_ratio = 0.1
+envelope_attack_high_ratio = 0.9
+envelope_sustain_start = 0.35
+envelope_sustain_end = 0.75
+envelope_release_ratio = 0.1
+
+# Rhythm
+min_tempo_bpm = 40.0
+max_tempo_bpm = 240.0
+min_onset_events_for_tempo = 4
+min_duration_for_tempo_seconds = 0.5
+# Evidence gate (see docs/metrics.md and rhythm.py module docstring)
+min_beats_for_tempo = 3
+max_beat_interval_cv = 0.35
+min_tempo_periodicity = 0.30
+
+# Reverberation / file-tail decay estimate
+decay_fit_db_range = 20.0
+decay_min_r2 = 0.85
+decay_min_duration_seconds = 0.05
+
+# Preliminary vector (M4A appends from index 22; 0–21 unchanged)
+vector_version = "0.4.0-preliminary"

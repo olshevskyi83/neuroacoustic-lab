@@ -48,14 +48,16 @@ Frame features use magnitude STFT `S[f,t]=|X[f,t]|` with Hann window, configurab
 
 ## Preliminary vector
 
-Version `0.3.0-preliminary`:
+Version `0.4.0-preliminary`:
 
 - Indices **0–11**: Milestone 2 spectral/energy prefix (unchanged labels/scaling).
-- Indices **12–21**: Milestone 3 pitch/harmonic appends (`voiced_ratio`, `f0_median_norm`, …).
+- Indices **12–21**: Milestone 3 pitch/harmonic appends (unchanged).
+- Indices **22–35**: Milestone 4A envelope / stereo / rhythm / decay appends.
+
 See `neuroacoustic.fingerprint.normalization` for the exact ordering and scales.
 
-Unavailable pitch/harmonics contribute **0.0** in the vector; F0 aggregates in the
-fingerprint body use **null**, never a fabricated 0 Hz pitch.
+Unavailable pitch/harmonics/tempo/decay contribute **0.0** in the vector;
+fingerprint body fields use **null** where evidence is insufficient.
 
 ## Pitch (Milestone 3)
 
@@ -96,6 +98,87 @@ to the local fundamental peak.
 resolvable; the synthetic `detuned_partials` fixture uses offsets of 30–50 Hz
 (>1 bin) so discrimination is above the resolution floor.
 
-## Reserved (later milestones)
+## Envelope / ADSR estimates (Milestone 4A)
 
-Envelope, stereo, rhythm, reverberation.
+Derived from a **smoothed frame-RMS envelope**. These are shape descriptors,
+**not** a recovered synthesizer ADSR program.
+
+| Metric | Algorithm | Unit | Limitations |
+|--------|-----------|------|-------------|
+| `onset_time_s` | First time env ≥ `onset_ratio * peak` | s | Threshold heuristic |
+| `attack_time_s` | Onset → `attack_high_ratio * peak` | s | Fallback to peak time |
+| `decay_time_s` | Peak → sustain absolute level | s | 0 if never falls (sustained) |
+| `sustain_level` | Median mid-file env / peak | 0–1 relative | Window `[sustain_start, sustain_end]` |
+| `release_time_s` | Late fall mid-sustain → `release_ratio * peak` | s | Percussive uses 50%→10% path |
+| `confidence` | Heuristic from shape/length | 0–1 | Always warns `not_synthesizer_adsr` |
+
+Silent / near-silent / very short signals return null ADSR fields.
+
+## Stereo (Milestone 4A)
+
+Input layout `(n_samples, n_channels)`. Mono → `is_mono=true`, width/correlation **null**.
+
+| Metric | Definition | Unit | Notes |
+|--------|------------|------|-------|
+| `left_rms` / `right_rms` | Channel RMS | linear | — |
+| `correlation` | Pearson(L, R) | −1…1 | Null if a channel is silent |
+| `mid_energy` | `mean(((L+R)/2)²)` | linear² | — |
+| `side_energy` | `mean(((L-R)/2)²)` | linear² | — |
+| `side_to_mid_ratio` | `side_energy / mid_energy` when mid usable | 1 | **null** if mid ≈ 0 (e.g. inverted identical) |
+| `stereo_width_estimate` | `clip(0.5*(1−corr), 0, 1)` | 0–1 | **Correlation / phase-opposition heuristic only** — not a complete perceptual stereo-width metric |
+
+Nearly inverted channels warn `phase_opposition` and `mono_compatibility_risk`.
+
+## Rhythm (Milestone 4A)
+
+| Metric | Meaning | Unit | Limitations |
+|--------|---------|------|-------------|
+| `onset_strength_*` | librosa onset-strength envelope stats | arb. | Not calibrated |
+| `onset_event_count` | Detected onset frames | count | — |
+| `tempo_bpm` | librosa `beat_track` tempo **if gate passes** | BPM | **null** if evidence weak |
+| `beat_times_s` | Beat positions | s | Empty when tempo null |
+| `beat_count` | Accepted beat count | count | 0 when tempo null |
+| `beat_interval_cv` | `std(Δt)/mean(Δt)` of beat intervals | 1 | Needs ≥3 beats |
+| `tempo_periodicity` | Onset-envelope autocorr `R(τ)` at beat period | −1…1 | Primary periodicity evidence |
+| `confidence` | From periodicity × interval stability × beat density | 0–1 | Soft |
+
+### Tempo reliability gate
+
+A candidate BPM is **accepted only if all** hold (defaults in `config/default.toml`):
+
+1. `duration ≥ min_duration_for_tempo_seconds` (0.5 s)
+2. `onset_event_count ≥ min_onset_events_for_tempo` (4)
+3. `beat_count ≥ min_beats_for_tempo` (3)
+4. If ≥2 intervals: `beat_interval_cv ≤ max_beat_interval_cv` (0.35)
+5. `R(τ) ≥ min_tempo_periodicity` (0.30), where `R(τ)` is the normalized
+   autocorrelation of the zero-mean onset-strength envelope at lag
+   `τ = 60/tempo` seconds
+
+**Why periodicity, not BPM blacklists:** `beat_track` can invent a near-regular
+grid on long broadband noise (low interval CV) while `R(τ)` stays low
+(≲ 0.2). Periodic click tracks yield high `R(τ)` (typically ≳ 0.6). The 0.30
+threshold is a conservative lower bound on that separation, not a fixture-tuned
+BPM rule.
+
+On failure: `tempo_bpm=null`, empty beats, low confidence, and an explicit
+warning such as `tempo_suppressed_insufficient_periodicity`.
+
+**Half-/double-time:** when tempo is reported, warning `half_double_time_ambiguity`
+is always attached. Drones/silence yield **null** tempo.
+
+## Reverberation / file-tail decay (Milestone 4A)
+
+Broadband energy-envelope fit after the peak: `energy_db = a + b·t` with
+`energy_db = 10 log10(mean(frame²))`.
+
+| Metric | Meaning | Unit | Notes |
+|--------|---------|------|-------|
+| `decay_slope_db_per_s` | Fitted slope `b` | dB/s | Energy dB, not amplitude dB |
+| `tail_decay_t60_estimate_seconds` | `60 / \|b\|` | s | Extrapolated; **file-tail T60 estimate**, not room RT60 |
+| `fit_r_squared` | Linear-fit R² | 0–1 | Below `decay_min_r2` → null T60 |
+| `fit_db_range` | Measured post-peak drop used | dB | — |
+| `analyzed_frequency_range_hz` | Documented band | Hz | Fullband envelope in MVP |
+
+**Not room RT60** for arbitrary mixed music. Sustained tones and poor fits
+return **null**. Warnings always include `file_tail_decay_not_room_rt60` and
+`not_exact_rt60_for_mixed_music`.

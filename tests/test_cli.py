@@ -126,7 +126,7 @@ def test_analyze_json(fixtures_dir: Path, tmp_path: Path) -> None:
     )
     assert result.exit_code == 0, result.stdout + result.stderr
     payload = json.loads(result.stdout)
-    assert payload["schema_version"] == "0.3.0"
+    assert payload["schema_version"] == "0.4.0"
     assert "spectral" in payload
     assert "energy" in payload
 

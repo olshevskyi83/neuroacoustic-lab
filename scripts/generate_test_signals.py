@@ -8,9 +8,19 @@ Signals (default 1.0 s @ 44100 Hz unless noted):
   4. white noise (seeded)
   5. silence
   6. short impulse with exponential decay
-  7. stereo with controlled channel correlation
+  7. stereo with controlled channel correlation (ρ≈0.8)
   8. mildly detuned partials (inharmonicity test)
   9. short 440 Hz sine (0.05 s)
+ Milestone 4A:
+ 10. slow-attack sine (linear fade-in)
+ 11. sustained tone (constant amplitude)
+ 12. mono (explicit single-channel sine)
+ 13. identical stereo channels
+ 14. inverted stereo channels
+ 15. independent/uncorrelated stereo channels
+ 16. click track at 120 BPM (4 s)
+ 17. drone without beats (long sine)
+ 18. exponentially decaying noise burst
 """
 
 from __future__ import annotations
@@ -49,21 +59,7 @@ def additive(duration: float, sr: int) -> np.ndarray:
 
 
 def detuned_partials(duration: float, sr: int) -> np.ndarray:
-    """Detuned partials for inharmonicity discrimination.
-
-    Offsets are large enough to resolve above STFT bin width
-    (Δf = 44100/2048 ≈ 21.5 Hz) after parabolic peak interpolation, while
-    keeping a dominant 110 Hz partial so pYIN can still track F0:
-
-      n=1: 110 Hz  (exact, amplitude 0.55)
-      n=2: 235 Hz  (+15 Hz vs 220; ≈ 0.70 bins; +6.8%)
-      n=3: 355 Hz  (+25 Hz vs 330; ≈ 1.16 bins; +7.6%)
-      n=4: 470 Hz  (+30 Hz vs 440; ≈ 1.39 bins; +6.8%)
-
-    True mean |f_n/(n·110)−1| for n=2..4 ≈ 0.071.
-    With inharmonicity referenced to the measured f₁ peak (not drifted pYIN
-    F0), this separates cleanly from an exact harmonic stack (~0.005).
-    """
+    """Detuned partials for inharmonicity discrimination (see M3 docs)."""
     amps = {110.0: 0.55, 235.0: 0.28, 355.0: 0.16, 470.0: 0.10}
     t = _time_vector(duration, sr)
     out = np.zeros_like(t, dtype=np.float64)
@@ -85,12 +81,35 @@ def silence(duration: float, sr: int) -> np.ndarray:
 
 
 def impulse_decay(sr: int, decay_tau: float = 0.05, amplitude: float = 0.9) -> np.ndarray:
+    """Percussive attack + exponential amplitude decay (τ seconds)."""
     duration = 0.5
     n = int(round(duration * sr))
     t = np.arange(n, dtype=np.float64) / sr
     signal = amplitude * np.exp(-t / decay_tau)
     signal[0] = amplitude
     return signal.astype(np.float32)
+
+
+def slow_attack_sine(
+    freq: float = 220.0,
+    duration: float = 1.0,
+    sr: int = DEFAULT_SR,
+    attack_s: float = 0.4,
+    amplitude: float = 0.5,
+) -> np.ndarray:
+    """Sine with linear fade-in over ``attack_s`` then sustained."""
+    t = _time_vector(duration, sr)
+    env = np.ones_like(t)
+    n_att = int(round(attack_s * sr))
+    if n_att > 0:
+        env[:n_att] = np.linspace(0.0, 1.0, n_att, endpoint=False)
+    return (amplitude * env * np.sin(2.0 * np.pi * freq * t)).astype(np.float32)
+
+
+def sustained_tone(
+    freq: float = 330.0, duration: float = 1.0, sr: int = DEFAULT_SR, amplitude: float = 0.4
+) -> np.ndarray:
+    return sine(freq, duration, sr, amplitude=amplitude)
 
 
 def stereo_correlated(duration: float, sr: int, correlation: float = 0.8) -> np.ndarray:
@@ -106,6 +125,74 @@ def stereo_correlated(duration: float, sr: int, correlation: float = 0.8) -> np.
     return stereo
 
 
+def stereo_identical(duration: float, sr: int) -> np.ndarray:
+    mono = sine(440.0, duration, sr, amplitude=0.4)
+    return np.stack([mono, mono], axis=1)
+
+
+def stereo_inverted(duration: float, sr: int) -> np.ndarray:
+    mono = sine(440.0, duration, sr, amplitude=0.4)
+    return np.stack([mono, -mono], axis=1)
+
+
+def stereo_independent(duration: float, sr: int) -> np.ndarray:
+    """Near-zero correlation via independent seeded noise channels."""
+    rng = np.random.default_rng(RNG_SEED + 7)
+    n = int(round(duration * sr))
+    left = rng.standard_normal(n)
+    right = rng.standard_normal(n)
+    stereo = np.stack([left, right], axis=1)
+    peak = np.max(np.abs(stereo)) or 1.0
+    return (stereo * (0.4 / peak)).astype(np.float32)
+
+
+def click_track(
+    bpm: float = 120.0,
+    duration: float = 4.0,
+    sr: int = DEFAULT_SR,
+    click_duration: float = 0.01,
+    amplitude: float = 0.8,
+) -> np.ndarray:
+    """Periodic clicks at ``bpm`` for tempo tests."""
+    n = int(round(duration * sr))
+    out = np.zeros(n, dtype=np.float64)
+    period = 60.0 / bpm
+    click_n = max(1, int(round(click_duration * sr)))
+    t_click = np.arange(click_n, dtype=np.float64) / sr
+    # Short decaying burst as click
+    click = amplitude * np.exp(-t_click / 0.003) * np.sin(2.0 * np.pi * 1000.0 * t_click)
+    t = 0.0
+    while t < duration:
+        start = int(round(t * sr))
+        end = min(n, start + click_n)
+        out[start:end] += click[: end - start]
+        t += period
+    peak = np.max(np.abs(out)) or 1.0
+    return (out * (0.9 / peak)).astype(np.float32)
+
+
+def drone(duration: float = 3.0, sr: int = DEFAULT_SR, freq: float = 110.0) -> np.ndarray:
+    """Long steady tone with negligible onset contrast."""
+    return sine(freq, duration, sr, amplitude=0.35)
+
+
+def exp_decay_noise(
+    sr: int = DEFAULT_SR,
+    duration: float = 1.0,
+    decay_tau: float = 0.12,
+    amplitude: float = 0.7,
+) -> np.ndarray:
+    """Band-limited-ish noise with exponential amplitude envelope (known τ)."""
+    rng = np.random.default_rng(RNG_SEED + 11)
+    n = int(round(duration * sr))
+    t = np.arange(n, dtype=np.float64) / sr
+    noise = rng.standard_normal(n)
+    env = amplitude * np.exp(-t / decay_tau)
+    out = noise * env
+    peak = np.max(np.abs(out)) or 1.0
+    return (out * (0.9 / peak)).astype(np.float32)
+
+
 def write_all(out_dir: Path, sr: int = DEFAULT_SR, duration: float = DEFAULT_DURATION) -> list[Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     files: list[tuple[str, np.ndarray]] = [
@@ -118,6 +205,15 @@ def write_all(out_dir: Path, sr: int = DEFAULT_SR, duration: float = DEFAULT_DUR
         ("impulse_decay.wav", impulse_decay(sr)),
         ("stereo_correlated.wav", stereo_correlated(duration, sr, correlation=0.8)),
         ("short_sine_440hz.wav", sine(440.0, 0.05, sr)),
+        ("slow_attack_sine.wav", slow_attack_sine(duration=duration, sr=sr)),
+        ("sustained_tone.wav", sustained_tone(duration=duration, sr=sr)),
+        ("mono_sine.wav", sine(440.0, duration, sr)),
+        ("stereo_identical.wav", stereo_identical(duration, sr)),
+        ("stereo_inverted.wav", stereo_inverted(duration, sr)),
+        ("stereo_independent.wav", stereo_independent(duration, sr)),
+        ("click_track_120bpm.wav", click_track(bpm=120.0, duration=4.0, sr=sr)),
+        ("drone.wav", drone(duration=3.0, sr=sr)),
+        ("exp_decay_noise.wav", exp_decay_noise(sr=sr, duration=1.0, decay_tau=0.12)),
     ]
     written: list[Path] = []
     for name, data in files:

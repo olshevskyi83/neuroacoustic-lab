@@ -30,16 +30,21 @@ def test_fingerprint_validates_for_sine(fixtures_dir: Path, app_config: AppConfi
         plots=False,
     )
     fp = AcousticFingerprint.model_validate(result.fingerprint.to_json_dict())
-    assert fp.schema_version == "0.3.0"
-    assert fp.analysis_version == "0.3.0"
+    assert fp.schema_version == "0.4.0"
+    assert fp.analysis_version == "0.4.0"
     assert fp.spectral.fft.peak_frequency_hz is not None
     assert abs(fp.spectral.fft.peak_frequency_hz - 440.0) < 5.0
     assert fp.pitch.f0_median_hz is not None
     assert fp.vector_meta is not None
     assert len(fp.vector) == len(fp.vector_meta.labels)
-    assert len(fp.vector) >= 22
+    assert len(fp.vector) == 36
     assert fp.vector_meta.labels[0] == "peak_freq_norm"
     assert fp.vector_meta.labels[12] == "voiced_ratio"
+    assert fp.vector_meta.labels[22] == "attack_time_norm"
+    assert fp.envelope.confidence is not None
+    assert fp.stereo.is_mono is True
+    assert fp.rhythm.onset_event_count >= 0
+    assert isinstance(fp.reverberation.warnings, list)
     assert "STFT" not in json.dumps(fp.to_json_dict()).upper() or True
     # Ensure we did not dump a giant raw STFT matrix: mean spectrum is bounded.
     assert len(fp.spectral.stft.mean_spectrum_magnitudes) <= app_config.analysis.fft_summary_bins + 1
