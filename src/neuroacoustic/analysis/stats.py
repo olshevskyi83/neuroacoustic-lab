@@ -98,6 +98,6 @@ class TimeSeriesSummary(BaseModel):
     """Downsampled curve retained in the fingerprint (not full-resolution)."""
 
     times_seconds: list[float] = Field(default_factory=list)
-    values: list[float] = Field(default_factory=list)
+    values: list[float | None] = Field(default_factory=list)
     unit: str
     description: str = ""

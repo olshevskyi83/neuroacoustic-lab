@@ -24,10 +24,12 @@ def fixtures_dir(repo_root: Path) -> Path:
         "sine_110hz.wav",
         "sine_440hz.wav",
         "additive_harmonics.wav",
+        "detuned_partials.wav",
         "white_noise.wav",
         "silence.wav",
         "impulse_decay.wav",
         "stereo_correlated.wav",
+        "short_sine_440hz.wav",
     ]
     if not all((out / name).exists() for name in needed):
         import sys

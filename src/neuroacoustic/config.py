@@ -27,8 +27,8 @@ DEFAULT_CONFIG_PATH = _repo_root() / "config" / "default.toml"
 
 class ProjectConfig(BaseModel):
     name: str = "neuroacoustic-lab"
-    analysis_version: str = "0.2.0"
-    schema_version: str = "0.2.0"
+    analysis_version: str = "0.3.0"
+    schema_version: str = "0.3.0"
 
 
 class PathsConfig(BaseModel):
@@ -68,7 +68,7 @@ class ProbeConfig(BaseModel):
 
 
 class AnalysisConfig(BaseModel):
-    """Frame-level analysis parameters (Milestone 2)."""
+    """Frame-level analysis parameters (Milestone 2–3)."""
 
     n_fft: int = 2048
     hop_length: int = 512
@@ -80,7 +80,20 @@ class AnalysisConfig(BaseModel):
     max_timeseries_points: int = 256
     fft_summary_bins: int = 128
     amplitude_floor: float = 1.0e-12
-    vector_version: str = "0.2.0-preliminary"
+    # Pitch (pYIN)
+    f0_min_hz: float = 65.0
+    f0_max_hz: float = 2000.0
+    f0_frame_length: int = 2048
+    # Soft confidence warning threshold (high-confidence voicing)
+    voiced_prob_threshold: float = 0.5
+    # Hard floor for treating a frame as voiced in F0 aggregates
+    voiced_prob_floor: float = 0.1
+    min_voiced_frames: int = 3
+    # Harmonics
+    max_harmonics: int = 12
+    harmonic_search_width_fraction: float = 0.10
+    harmonic_rel_amp_threshold: float = 0.05
+    vector_version: str = "0.3.0-preliminary"
 
     def effective_win_length(self) -> int:
         return int(self.win_length or self.frame_length or self.n_fft)

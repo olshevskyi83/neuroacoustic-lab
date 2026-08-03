@@ -12,8 +12,8 @@ from neuroacoustic.fingerprint.models import SourceMetadata
 
 def test_load_default_config(repo_root: Path) -> None:
     cfg = load_config(repo_root / "config" / "default.toml")
-    assert cfg.project.schema_version == "0.2.0"
-    assert cfg.project.analysis_version == "0.2.0"
+    assert cfg.project.schema_version == "0.3.0"
+    assert cfg.project.analysis_version == "0.3.0"
     assert "wav" in cfg.audio.supported_extensions
     assert cfg.audio.analysis_sample_rate is None
     assert cfg.analysis.n_fft == 2048

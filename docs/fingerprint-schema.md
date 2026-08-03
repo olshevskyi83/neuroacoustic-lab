@@ -2,88 +2,66 @@
 
 ## Current version
 
-- `schema_version`: **0.2.0** (Milestone 2 structure)
-- `analysis_version`: **0.2.0** (spectral + energy algorithms)
+- `schema_version`: **0.3.0** (populated `pitch` / `harmonics` sections)
+- `analysis_version`: **0.3.0** (pYIN pitch + harmonic peak analysis)
+- `vector_version`: **0.3.0-preliminary** (M2 prefix + M3 append)
 
-## Document shape
+## Document shape (abridged)
 
 ```json
 {
-  "schema_version": "0.2.0",
-  "analysis_version": "0.2.0",
-  "source": { "...": "SourceMetadata" },
-  "analysis_config": { "...": "AnalysisConfigSnapshot" },
-  "quality": {
-    "clipping_ratio": 0.0,
-    "silence_ratio": 0.0,
-    "peak_amplitude": 0.0,
-    "warnings": []
+  "schema_version": "0.3.0",
+  "analysis_version": "0.3.0",
+  "source": {},
+  "analysis_config": {},
+  "quality": {},
+  "spectral": {},
+  "pitch": {
+    "method": "librosa.pyin",
+    "f0_median_hz": 440.0,
+    "voiced_ratio": 0.9,
+    "confidence": 0.8,
+    "f0_voiced_hz": { "mean": 440.0, "median": 440.0, "count": 80 },
+    "f0_curve": { "times_seconds": [], "values": [440.0, null], "unit": "Hz" },
+    "note": "Single-F0 estimate..."
   },
-  "spectral": {
-    "fft": { "peak_frequency_hz": 440.0, "peaks": [], "summary_*": [] },
-    "stft": {
-      "n_fft": 2048,
-      "hop_length": 512,
-      "n_frames": 87,
-      "mean_spectrum_frequencies_hz": [],
-      "mean_spectrum_magnitudes": []
-    },
-    "centroid_hz": { "mean": 0, "std": 0, "median": 0, "p05": 0, "p25": 0, "p75": 0, "p95": 0, "minimum": 0, "maximum": 0, "count": 0 },
-    "bandwidth_hz": {},
-    "rolloff_hz": {},
-    "flatness": {},
-    "entropy": {},
-    "contrast_db": {},
-    "centroid_curve": { "times_seconds": [], "values": [], "unit": "Hz" },
-    "flatness_curve": {}
+  "harmonics": {
+    "max_harmonics": 12,
+    "harmonic_slots_available": 12.0,
+    "frequency_resolution_hz": 21.53,
+    "inharmonicity_resolution_floor": 0.05,
+    "harmonic_count": 4.0,
+    "harmonic_density": 0.33,
+    "peak_frequencies_hz": [110.0, 220.0, 330.0, 440.0],
+    "relative_amplitudes": [1.0, 0.5, 0.25, 0.12],
+    "normalized_distribution": [],
+    "harmonic_energy_fraction_estimate": 0.7,
+    "inharmonicity_estimate": 0.001,
+    "note": "energy fraction is linear [0,1], not HNR dB."
   },
-  "pitch": {},
-  "harmonics": {},
-  "energy": {
-    "rms": 0.0,
-    "rms_db": 0.0,
-    "peak_amplitude": 0.0,
-    "crest_factor": 0.0,
-    "zero_crossing_rate": 0.0,
-    "estimated_dynamic_range_db": 0.0,
-    "rms_frame": {},
-    "rms_curve": {}
-  },
+  "energy": {},
   "envelope": {},
   "stereo": {},
   "rhythm": {},
   "reverberation": {},
   "vector": [],
   "vector_meta": {
-    "version": "0.2.0-preliminary",
-    "values": [],
-    "labels": [],
-    "note": "Preliminary..."
+    "version": "0.3.0-preliminary",
+    "labels": ["peak_freq_norm", "...", "voiced_ratio", "..."]
   },
-  "artifacts": {
-    "fingerprint_json": "...",
-    "waveform_png": "...",
-    "fft_png": "...",
-    "fft_log_png": "...",
-    "spectrogram_png": "..."
-  },
+  "artifacts": {},
   "created_at": "ISO-8601"
 }
 ```
 
 ## What is intentionally omitted
 
-- The complete raw STFT / spectrogram matrix
-- Full-resolution FFT bins (only peak list + downsampled summaries)
-- Full-resolution time series (curves capped by `max_timeseries_points`)
+- Full STFT / spectrogram matrices
+- Full-resolution F0 / harmonic-per-frame matrices (curves are downsampled; harmonic summary is aggregated)
 
 ## Versioning / forward compatibility
 
 - Bump `schema_version` on breaking JSON shape changes.
 - Bump `analysis_version` when algorithms or defaults change numeric outputs.
-- Empty objects (`pitch`, `harmonics`, …) reserve slots for later milestones.
-- Consumers should ignore unknown fields and tolerate missing optional sections.
-
-## Source models (Milestone 1+)
-
-`SourceMetadata`, `AnalysisConfigSnapshot`, `QualityMetrics`, `ProbeResult` remain the probe/identity layer.
+- Preliminary vector keeps indices 0–11 stable; M3 appends at 12+.
+- Empty `envelope` / `stereo` / `rhythm` / `reverberation` reserve later milestones.

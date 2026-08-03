@@ -20,7 +20,7 @@ def test_pipeline_writes_json_and_plots(
     )
     assert result.fingerprint_path.exists()
     payload = json.loads(result.fingerprint_path.read_text(encoding="utf-8"))
-    assert payload["schema_version"] == "0.2.0"
+    assert payload["schema_version"] == "0.3.0"
     arts = result.fingerprint.artifacts
     assert arts.waveform_png and Path(arts.waveform_png).exists()
     assert arts.fft_png and Path(arts.fft_png).exists()

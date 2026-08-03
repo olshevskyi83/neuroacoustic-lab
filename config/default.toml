@@ -1,9 +1,9 @@
-# NeuroAcoustic Lab — default analysis configuration (Milestone 2)
+# NeuroAcoustic Lab — default analysis configuration (Milestone 3)
 
 [project]
 name = "neuroacoustic-lab"
-analysis_version = "0.2.0"
-schema_version = "0.2.0"
+analysis_version = "0.3.0"
+schema_version = "0.3.0"
 
 [paths]
 input_dir = "data/input"
@@ -36,17 +36,33 @@ prefer_ffprobe = true
 n_fft = 2048
 hop_length = 512
 win_length = 2048
-# Spectral rolloff cumulative-energy fraction (0–1)
 rolloff_percentile = 0.85
-# Spectral contrast octave bands (librosa)
 n_contrast_bands = 6
-# Max magnitude peaks retained in the FFT summary
 fft_peak_count = 8
-# Max points retained for downsampled time-series curves in JSON
 max_timeseries_points = 256
-# Magnitude spectrum bins retained in FFT summary (log-spaced copy also stored)
 fft_summary_bins = 128
-# Floor (linear amplitude) used when converting ratios to dB to avoid log(0)
 amplitude_floor = 1.0e-12
-# Preliminary comparison-vector version label
-vector_version = "0.2.0-preliminary"
+
+# Pitch (librosa pYIN)
+f0_min_hz = 65.0
+f0_max_hz = 2000.0
+# pYIN frame length in samples (independent of STFT n_fft when needed)
+f0_frame_length = 2048
+# Soft confidence warning threshold (high-confidence voicing)
+voiced_prob_threshold = 0.5
+# Hard floor: frames with voiced_prob below this are treated as unvoiced for aggregates
+voiced_prob_floor = 0.1
+# Warn when fewer voiced frames than this are available
+min_voiced_frames = 3
+
+# Harmonics
+max_harmonics = 12
+# Relative search half-width around n*F0 as a fraction of the *target*
+# frequency n*F0 (capped below 0.45*F0 so neighbors are not merged).
+# 0.10 catches resolvable detuning of ~1 bin while preserving harmonic separation.
+harmonic_search_width_fraction = 0.10
+# Minimum peak magnitude relative to the local fundamental peak
+harmonic_rel_amp_threshold = 0.05
+
+# Preliminary comparison-vector version (M3 appends pitch/harmonic dims)
+vector_version = "0.3.0-preliminary"

@@ -9,6 +9,8 @@ Signals (default 1.0 s @ 44100 Hz unless noted):
   5. silence
   6. short impulse with exponential decay
   7. stereo with controlled channel correlation
+  8. mildly detuned partials (inharmonicity test)
+  9. short 440 Hz sine (0.05 s)
 """
 
 from __future__ import annotations
@@ -42,7 +44,32 @@ def additive(duration: float, sr: int) -> np.ndarray:
     for freq, amp in amps.items():
         out += amp * np.sin(2.0 * np.pi * freq * t)
     peak = np.max(np.abs(out)) or 1.0
-    # Scale to peak 0.9 without changing relative harmonic amplitudes.
+    out = out * (0.9 / peak)
+    return out.astype(np.float32)
+
+
+def detuned_partials(duration: float, sr: int) -> np.ndarray:
+    """Detuned partials for inharmonicity discrimination.
+
+    Offsets are large enough to resolve above STFT bin width
+    (Δf = 44100/2048 ≈ 21.5 Hz) after parabolic peak interpolation, while
+    keeping a dominant 110 Hz partial so pYIN can still track F0:
+
+      n=1: 110 Hz  (exact, amplitude 0.55)
+      n=2: 235 Hz  (+15 Hz vs 220; ≈ 0.70 bins; +6.8%)
+      n=3: 355 Hz  (+25 Hz vs 330; ≈ 1.16 bins; +7.6%)
+      n=4: 470 Hz  (+30 Hz vs 440; ≈ 1.39 bins; +6.8%)
+
+    True mean |f_n/(n·110)−1| for n=2..4 ≈ 0.071.
+    With inharmonicity referenced to the measured f₁ peak (not drifted pYIN
+    F0), this separates cleanly from an exact harmonic stack (~0.005).
+    """
+    amps = {110.0: 0.55, 235.0: 0.28, 355.0: 0.16, 470.0: 0.10}
+    t = _time_vector(duration, sr)
+    out = np.zeros_like(t, dtype=np.float64)
+    for freq, amp in amps.items():
+        out += amp * np.sin(2.0 * np.pi * freq * t)
+    peak = np.max(np.abs(out)) or 1.0
     out = out * (0.9 / peak)
     return out.astype(np.float32)
 
@@ -58,27 +85,19 @@ def silence(duration: float, sr: int) -> np.ndarray:
 
 
 def impulse_decay(sr: int, decay_tau: float = 0.05, amplitude: float = 0.9) -> np.ndarray:
-    """Unit impulse at t=0 followed by exponential decay envelope on a short buffer."""
     duration = 0.5
     n = int(round(duration * sr))
     t = np.arange(n, dtype=np.float64) / sr
-    # Impulse excitation with exponential decay (simple synthetic reverb-like tail).
-    signal = np.zeros(n, dtype=np.float64)
-    signal[0] = amplitude
-    signal *= np.exp(-t / decay_tau)
-    # Also apply decaying click as soft tone carrier for non-zero length content.
     signal = amplitude * np.exp(-t / decay_tau)
     signal[0] = amplitude
     return signal.astype(np.float32)
 
 
 def stereo_correlated(duration: float, sr: int, correlation: float = 0.8) -> np.ndarray:
-    """Two-channel signal with approximate inter-channel correlation ``correlation``."""
     rng = np.random.default_rng(RNG_SEED + 1)
     n = int(round(duration * sr))
     left = rng.standard_normal(n)
     independent = rng.standard_normal(n)
-    # right = rho * left + sqrt(1-rho^2) * independent  (for unit-variance Gaussian)
     rho = float(np.clip(correlation, -1.0, 1.0))
     right = rho * left + np.sqrt(max(0.0, 1.0 - rho * rho)) * independent
     stereo = np.stack([left, right], axis=1)
@@ -93,10 +112,12 @@ def write_all(out_dir: Path, sr: int = DEFAULT_SR, duration: float = DEFAULT_DUR
         ("sine_110hz.wav", sine(110.0, duration, sr)),
         ("sine_440hz.wav", sine(440.0, duration, sr)),
         ("additive_harmonics.wav", additive(duration, sr)),
+        ("detuned_partials.wav", detuned_partials(duration, sr)),
         ("white_noise.wav", white_noise(duration, sr)),
         ("silence.wav", silence(duration, sr)),
         ("impulse_decay.wav", impulse_decay(sr)),
         ("stereo_correlated.wav", stereo_correlated(duration, sr, correlation=0.8)),
+        ("short_sine_440hz.wav", sine(440.0, 0.05, sr)),
     ]
     written: list[Path] = []
     for name, data in files:

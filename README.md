@@ -4,7 +4,7 @@ Local-first research platform for analyzing sound by its **physical acoustic pro
 
 The first milestone is a reliable **Audio Analysis Engine** that turns an audio file into a reproducible acoustic fingerprint.
 
-> **Current status:** Milestone 2 — spectral + energy fingerprinting, JSON export, and PNG plots. Pitch/harmonics (M3) and SQLite/persistence extras (M4) are not implemented yet.
+> **Current status:** Milestone 3 — pitch (pYIN), voicing, and harmonic analysis added to the acoustic fingerprint. Envelope/stereo/rhythm/reverb and SQLite are not implemented yet.
 
 ## Philosophy
 
@@ -76,13 +76,15 @@ neuroacoustic analyze path/to/audio.wav --no-plots --json
 
 A versioned Pydantic document capturing source metadata, analysis config, quality warnings, acoustic feature summaries, and a preliminary comparison vector. Schema details: [`docs/fingerprint-schema.md`](docs/fingerprint-schema.md).
 
-## Current limitations (Milestone 2)
+## Current limitations (Milestone 3)
 
-- Pitch, harmonics, envelope, stereo, rhythm, and reverb are empty placeholders.
+- Envelope, stereo, rhythm, and reverb are empty placeholders (Milestone 4).
 - No SQLite persistence yet (`--database` ignored with a warning).
-- Preliminary comparison vector is heuristically scaled — not corpus-normalized.
+- Preliminary vector is heuristically scaled — not corpus-normalized.
+- Pitch is a **single-F0** pYIN estimate; polyphonic mixes are not fully described.
+- `harmonic_energy_fraction_estimate` is a linear [0,1] heuristic (**not** HNR dB); `inharmonicity_estimate` is unresolved below the STFT resolution floor.
 - `estimated_dynamic_range_db` is a frame-RMS percentile heuristic, **not LUFS**.
-- Spectral/energy features use a mono mixdown of multi-channel files.
+- Multi-channel files are mono-averaged for analysis features.
 - MP3 decoding requires FFmpeg.
 
 ## Tests

@@ -1,4 +1,4 @@
-"""End-to-end analysis pipeline (Milestone 2)."""
+"""End-to-end analysis pipeline (Milestone 3)."""
 
 from __future__ import annotations
 
@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from neuroacoustic.analysis.energy import analyze_energy
+from neuroacoustic.analysis.harmonics import analyze_harmonics
+from neuroacoustic.analysis.pitch import analyze_pitch
 from neuroacoustic.analysis.spectral import analyze_spectral
 from neuroacoustic.analysis.spectrum import compute_fft_summary, compute_stft
 from neuroacoustic.analysis.stats import to_mono
@@ -60,7 +62,7 @@ def run_pipeline(
     plots: bool = True,
     force: bool = False,
 ) -> PipelineResult:
-    """Load audio, run Milestone 2 analysis, write fingerprint JSON and plots."""
+    """Load audio, run spectral/energy/pitch/harmonic analysis, write JSON/plots."""
     audio_path = Path(path)
     out_dir = Path(output_dir or config.paths.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -84,6 +86,8 @@ def run_pipeline(
     stft = compute_stft(mono, sr, config.analysis)
     spectral = analyze_spectral(stft, config.analysis)
     energy = analyze_energy(mono, sr, config.analysis)
+    pitch = analyze_pitch(mono, sr, config.analysis)
+    harmonics = analyze_harmonics(stft, pitch, config.analysis)
 
     stem = _stem_safe(loaded.source.filename)
     content_short = loaded.source.content_hash[:12]
@@ -131,6 +135,8 @@ def run_pipeline(
         stft=stft,
         spectral=spectral,
         energy=energy,
+        pitch=pitch,
+        harmonics=harmonics,
         artifacts=artifacts,
     )
 
@@ -139,7 +145,6 @@ def run_pipeline(
     _assert_json_finite(payload)
     fp_path.write_text(json.dumps(payload, indent=2, allow_nan=False) + "\n", encoding="utf-8")
     fingerprint.artifacts.fingerprint_json = str(fp_path)
-    # Rewrite with artifact path filled in.
     payload = fingerprint.to_json_dict()
     _assert_json_finite(payload)
     fp_path.write_text(json.dumps(payload, indent=2, allow_nan=False) + "\n", encoding="utf-8")
