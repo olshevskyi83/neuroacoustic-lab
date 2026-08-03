@@ -113,6 +113,67 @@ def test_mp3_probe_requires_ffmpeg(tmp_path: Path, app_config: AppConfig) -> Non
             probe_audio(fake, app_config)
 
 
+def _encode_mp3(src_wav: Path, dest_mp3: Path) -> None:
+    import subprocess
+
+    from neuroacoustic.audio.probe import ffmpeg_available
+
+    if not ffmpeg_available():
+        pytest.skip("ffmpeg not available")
+    completed = subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            str(src_wav),
+            "-codec:a",
+            "libmp3lame",
+            "-q:a",
+            "4",
+            str(dest_mp3),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        shell=False,
+    )
+    if completed.returncode != 0:
+        pytest.skip(f"ffmpeg MP3 encode failed: {completed.stderr.strip()}")
+
+
+def test_mp3_probe_and_load_when_ffmpeg_available(
+    fixtures_dir: Path, app_config: AppConfig, tmp_path: Path
+) -> None:
+    """MP3 probe/decode must work when FFmpeg is installed (Milestone 1)."""
+    from neuroacoustic.audio.probe import ffmpeg_available, ffprobe_available
+
+    if not (ffmpeg_available() and ffprobe_available()):
+        pytest.skip("ffmpeg/ffprobe not available")
+
+    mp3_path = tmp_path / "sine_440hz.mp3"
+    _encode_mp3(fixtures_dir / "sine_440hz.wav", mp3_path)
+
+    probed = probe_audio(mp3_path, app_config)
+    assert probed.source.probe_backend.value == "ffprobe"
+    assert probed.source.native_sample_rate == 44100
+    assert probed.source.channels == 1
+    assert probed.source.duration_seconds is not None
+    assert probed.source.duration_seconds > 0.5
+    assert probed.source.codec is not None
+
+    loaded = load_audio(mp3_path, app_config)
+    assert loaded.decode_backend == "ffmpeg"
+    assert loaded.samples.ndim == 1
+    assert loaded.samples.size > 0
+    assert np.isfinite(loaded.samples).all()
+    assert loaded.quality.peak_amplitude > 0.05
+    # Source file must remain untouched.
+    assert mp3_path.exists()
+
+
 def test_load_does_not_modify_source(fixtures_dir: Path, app_config: AppConfig) -> None:
     path = fixtures_dir / "white_noise.wav"
     before = path.read_bytes()

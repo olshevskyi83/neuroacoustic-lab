@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.metadata
 import json
 import platform
 import shutil
@@ -37,11 +38,25 @@ def _fail(message: str, code: int = 1) -> None:
     raise typer.Exit(code)
 
 
-def _check_python_import(module: str) -> tuple[bool, str]:
+def _package_version(module: str) -> str:
+    """Best-effort version string for an importable module."""
     try:
         mod = __import__(module)
-        version = getattr(mod, "__version__", "unknown")
-        return True, str(version)
+        version = getattr(mod, "__version__", None)
+        if version:
+            return str(version)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        return importlib.metadata.version(module)
+    except importlib.metadata.PackageNotFoundError:
+        return "unknown"
+
+
+def _check_python_import(module: str) -> tuple[bool, str]:
+    try:
+        __import__(module)
+        return True, _package_version(module)
     except Exception as exc:  # noqa: BLE001 — doctor must never crash on import probe
         return False, str(exc)
 
@@ -65,47 +80,68 @@ def doctor(
     table.add_column("Status")
     table.add_column("Detail")
 
-    table.add_row("neuroacoustic", "ok", f"v{__version__}")
-    table.add_row("schema_version", "ok", __schema_version__)
-    table.add_row("analysis_version", "ok", __analysis_version__)
-    table.add_row(
+    failures = 0
+    warnings = 0
+
+    def add_row(name: str, status: str, detail: str) -> None:
+        nonlocal failures, warnings
+        table.add_row(name, status, detail)
+        if status == "fail":
+            failures += 1
+        elif status in {"missing", "warn"}:
+            warnings += 1
+
+    add_row("neuroacoustic", "ok", f"v{__version__}")
+    add_row("schema_version", "ok", __schema_version__)
+    add_row("analysis_version", "ok", __analysis_version__)
+    add_row(
         "python",
         "ok" if sys.version_info >= (3, 11) else "fail",
         platform.python_version(),
     )
-    table.add_row("platform", "ok", f"{platform.system()} {platform.machine()}")
+    add_row("platform", "ok", f"{platform.system()} {platform.machine()}")
 
     for mod in ("numpy", "scipy", "librosa", "soundfile", "pydantic", "typer", "rich"):
         ok, detail = _check_python_import(mod)
-        table.add_row(f"py:{mod}", "ok" if ok else "fail", detail)
+        add_row(f"py:{mod}", "ok" if ok else "fail", detail)
 
-    table.add_row(
+    add_row(
         "ffmpeg",
         "ok" if ffmpeg_available() else "missing",
         shutil.which("ffmpeg") or "not on PATH — required for MP3 decode",
     )
-    table.add_row(
+    add_row(
         "ffprobe",
         "ok" if ffprobe_available() else "missing",
         shutil.which("ffprobe") or "not on PATH — required for MP3 probe",
     )
 
     cfg_path = cfg.config_path
-    table.add_row(
+    add_row(
         "config",
         "ok" if cfg_path and Path(cfg_path).exists() else "warn",
         str(cfg_path),
     )
-    table.add_row("output_dir", "ok", str(cfg.paths.output_dir))
-    table.add_row("database", "ok", str(cfg.paths.database))
+    add_row("output_dir", "ok", str(cfg.paths.output_dir))
+    add_row("database", "ok", str(cfg.paths.database))
 
     console.print(table)
 
-    missing_ffmpeg = not ffmpeg_available() or not ffprobe_available()
-    if missing_ffmpeg:
+    if not ffmpeg_available() or not ffprobe_available():
         err_console.print(
             "[yellow]warning:[/yellow] FFmpeg/ffprobe missing. "
             "WAV/FLAC/AIFF work via soundfile; MP3 requires FFmpeg."
+        )
+
+    if failures:
+        err_console.print(
+            f"[red]doctor failed:[/red] {failures} required check(s) failed."
+        )
+        raise typer.Exit(code=1)
+
+    if warnings:
+        err_console.print(
+            f"[yellow]doctor completed with {warnings} warning(s).[/yellow]"
         )
         raise typer.Exit(code=0)
 
