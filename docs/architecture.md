@@ -4,16 +4,18 @@
 
 ```
 audio file
-  -> validation and ffprobe metadata
-  -> decoding/loading
-  -> channel-aware preprocessing (preserve channels; mono mean for most analyses)
-  -> FFT summary + STFT (in-memory)
-  -> spectral + energy features
-  -> pitch (pYIN) + harmonic analysis
-  -> envelope / stereo / rhythm / file-tail decay (Milestone 4A)
-  -> fingerprint construction (summaries only)
-  -> JSON export + optional PNG plots
-  -> SQLite persistence                 (later; not 4A)
+  -> validation and metadata probe
+  -> decode / channel-aware load
+  -> content SHA-256
+  -> deterministic scientific config_hash
+  -> SQLite lookup (optional): completed (hash, analysis_version, config_hash)
+       | hit + not --force -> reuse fingerprint
+       | miss / --force    -> full analysis
+  -> spectral / energy / pitch / harmonics
+  -> envelope / stereo / rhythm / file-tail decay
+  -> Pydantic fingerprint + finite JSON check
+  -> write artifacts (absolute paths)
+  -> transactional SQLite upsert (optional)
 ```
 
 ## Module responsibilities
@@ -21,31 +23,113 @@ audio file
 | Package | Role |
 |---------|------|
 | `neuroacoustic.config` | TOML + env/CLI overrides |
-| `neuroacoustic.audio.*` | Probe, decode, float convert, resample, quality |
-| `neuroacoustic.analysis.spectrum` | FFT summary, STFT |
-| `neuroacoustic.analysis.spectral` | Centroid, bandwidth, rolloff, contrast, flatness, entropy |
-| `neuroacoustic.analysis.energy` | RMS, ZCR, peak, crest, estimated dynamic range |
-| `neuroacoustic.analysis.pitch` | pYIN F0 / voicing |
-| `neuroacoustic.analysis.harmonics` | Harmonic peaks, density, energy-fraction / inharmonicity |
-| `neuroacoustic.analysis.envelope` | Smoothed RMS envelope + ADSR-like estimates |
-| `neuroacoustic.analysis.stereo` | L/R RMS, correlation, mid/side, width estimate |
-| `neuroacoustic.analysis.rhythm` | Onset strength, optional tempo/beats |
-| `neuroacoustic.analysis.reverb` | File-tail exponential decay heuristic |
+| `neuroacoustic.audio.*` | Probe, decode, preprocess, quality |
+| `neuroacoustic.analysis.*` | Spectral, energy, pitch, harmonics, envelope, stereo, rhythm, reverb |
 | `neuroacoustic.fingerprint.*` | Pydantic models, builder, preliminary vector |
+| `neuroacoustic.persistence.*` | SQLite engine, ORM, config hash, repository |
+| `neuroacoustic.pipeline` | Orchestrates analyze → JSON/plots → optional DB |
+| `neuroacoustic.cli` | `doctor`, `probe`, `analyze`, `db init\|list\|show\|stats` |
 | `neuroacoustic.visualization.*` | Non-interactive matplotlib PNG plots |
-| `neuroacoustic.pipeline` | Orchestrates analyze → JSON/plots |
-| `neuroacoustic.cli` | `doctor`, `probe`, `analyze` |
 
-## Milestone 4A processing notes
+## SQLite schema (db_schema_version = 1)
 
-1. Spectral/energy/pitch/harmonics path unchanged from Milestone 3 (vector 0–21 stable).
-2. Envelope, rhythm, and decay run on mono; stereo uses preserved multi-channel samples.
-3. Tempo and T60-like fields are **null** when evidence is weak — never fabricated.
-4. SQLite remains deferred; `--database` is accepted with a warning.
+Tables:
+
+- **`schema_meta`** — key/value; includes `db_schema_version`
+- **`tracks`** — one row per unique `content_hash` (path/filename informational)
+- **`analyses`** — one row per `(content_hash, analysis_version, config_hash)`
+
+Important indexes: `content_hash`; identity triple; `created_at`; `status`;
+selected scalars (`centroid_mean_hz`, `flatness_mean`).
+
+Pragmas: `foreign_keys=ON`, `busy_timeout=5000`, `journal_mode=WAL`.
+
+Incompatible `db_schema_version` → hard error (no silent rebuild / destructive migration).
+
+## Cache / config-hash semantics
+
+Identity of a completed analysis:
+
+```
+content_hash + analysis_version + config_hash
+```
+
+`config_hash` = SHA-256 of canonical JSON from
+`neuroacoustic.persistence.config_hash.scientific_config_payload`:
+
+**Included:** analysis sample rate; silence/clipping thresholds that enter the
+fingerprint; all `AnalysisConfig` algorithm fields (`n_fft`, hop, pitch,
+harmonics, envelope, tempo gates, decay gates, `vector_version`, …).
+
+**Excluded:** `paths.*`, `logging.*`, project name, `config_path`, probe
+preference, `--plots` / `--output-dir` / display flags.
+
+Failed and in-progress rows are never returned for reuse.
+
+### `--force` semantics
+
+1. Bypasses the max-duration guard.
+2. When `--database` is set: skips cache reuse and re-runs analysis.
+3. **Only after a successful re-analysis** replaces the existing completed row
+   for the same identity in place (same primary key). Disposition: `forced`.
+4. If a forced re-analysis **fails**, the previous completed fingerprint remains
+   usable — `record_failed_analysis` refuses to overwrite a completed row.
+   No partial overwrite of fingerprint JSON / vector columns occurs.
+
+## Presentation artifacts vs scientific cache
+
+`--plots`, `--output-dir`, and logging are **excluded** from `config_hash`.
+On cache reuse:
+
+- The scientific fingerprint is returned unchanged (same analysis id).
+- Fingerprint JSON is re-materialized into the requested output directory when
+  needed (or a copy is written with a warning if the original path differs).
+- If plots are requested and missing on disk, they are regenerated from the
+  loaded audio without creating a new analysis identity; regenerated paths are
+  stored on the analysis row.
+- If plots remain only under a previous directory, a warning lists the original
+  location.
+- The CLI never claims plots were created when files are absent.
+
+## Track path semantics (MVP)
+
+`tracks` stores **first-seen** `source_path` / `filename` for a content hash.
+Re-analyzing identical bytes under another name updates `updated_at` (last-seen
+activity) but does not overwrite the canonical path. Only one path is retained;
+a multi-path history is a later enhancement.
+
+## Paths and portability
+
+- Artifact paths persisted as **absolute** resolved paths.
+- Source audio is never copied into the database.
+- Missing artifact files produce warnings on `db show`, not hard failures.
+- FFmpeg always via argument arrays (`shell=False`).
+- `db stats` size includes the main DB file plus `-wal` / `-shm` when present.
+
+## Persistence flow (`analyze --database`)
+
+1. Probe/hash input  
+2. Compute `config_hash`  
+3. Query completed analysis for the identity  
+4. Reuse when eligible (plus presentation artifact refresh)  
+5. Otherwise analyze  
+6. Pydantic-validate + reject NaN/Inf  
+7. Write artifacts  
+8. Transactional persist (replace only on successful `--force`)  
+9. Print disposition: `analyzed` | `reused` | `forced`  
+
+Without `--database`, JSON/plots only (backward compatible).
+
+## Future vector search
+
+SQLite remains the local system of record for fingerprints and metadata.
+A later vector database (e.g. Qdrant) will index embeddings without making
+SQLite rows disposable.
 
 ## Safety
 
-- FFmpeg via argument arrays (`shell=False`).
 - JSON written with `allow_nan=False`; pipeline rejects non-finite floats.
+- Uniqueness enforced in SQLite (`uq_analysis_identity`); insert races catch
+  `IntegrityError` and re-fetch only a **completed** winning row.
+- Transactions roll back on error; sessions are closed in `session_scope`.
 - Source audio is never overwritten.
-- Long-file matrices are not serialized into JSON.

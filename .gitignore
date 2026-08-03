@@ -30,6 +30,10 @@ htmlcov/
 *.db
 *.sqlite
 *.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+*.db-wal
+*.db-shm
 
 # Data directories (keep structure via .gitkeep)
 data/input/*

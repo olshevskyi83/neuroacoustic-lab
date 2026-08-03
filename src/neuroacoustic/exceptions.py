@@ -25,3 +25,15 @@ class DependencyError(NeuroAcousticError):
 
 class NotImplementedMilestoneError(NeuroAcousticError):
     """Feature deferred to a later milestone."""
+
+
+class DatabaseError(NeuroAcousticError):
+    """SQLite database is missing, unusable, or otherwise unavailable."""
+
+
+class DatabaseSchemaError(DatabaseError):
+    """Existing database schema is incompatible with this software version."""
+
+
+class AnalysisNotFoundError(DatabaseError):
+    """Requested analysis / track ID does not exist."""

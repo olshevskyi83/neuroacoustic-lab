@@ -131,6 +131,19 @@ def test_analyze_json(fixtures_dir: Path, tmp_path: Path) -> None:
     assert "energy" in payload
 
 
-def test_db_list_not_implemented() -> None:
-    result = runner.invoke(app, ["db", "list"])
-    assert result.exit_code == 2
+def test_db_list_missing_database(tmp_path: Path) -> None:
+    missing = tmp_path / "does_not_exist.sqlite"
+    result = runner.invoke(app, ["db", "list", "--database", str(missing)])
+    assert result.exit_code != 0
+    assert "not found" in (result.stdout + result.stderr).lower() or "error" in (
+        result.stdout + result.stderr
+    ).lower()
+
+
+def test_db_list_empty(tmp_path: Path) -> None:
+    db = tmp_path / "empty.sqlite"
+    init = runner.invoke(app, ["db", "init", "--database", str(db)])
+    assert init.exit_code == 0, init.stdout + init.stderr
+    result = runner.invoke(app, ["db", "list", "--database", str(db)])
+    assert result.exit_code == 0, result.stdout + result.stderr
+    assert "empty" in result.stdout.lower()
