@@ -21,6 +21,17 @@ or semantic explanations.
 The `0.4.0-preliminary` vectors have not been corpus-calibrated. In particular,
 the 25 pilot samples are insufficient to make broad similarity-quality claims.
 
+### Calibrated experimental space
+
+`qdrant calibration-report --database PATH --profile PROFILE.json` writes a
+reproducible `calibrated-v1` median/IQR profile. It centers each raw component,
+divides by IQR, sets zero-IQR dimensions to zero, applies documented group
+weights, then L2-normalizes. Missing preliminary measurements are already
+encoded as zero and are treated as observed zero. `sync-calibrated` requires a
+separate `neuroacoustic_fingerprints_calibrated_v1` collection and never alters
+the preliminary collection or SQLite vectors. This is retrieval calibration,
+not a clinical or perceptual model.
+
 Local-first research platform for analyzing sound by its **physical acoustic properties** — not genre, artist, album, or musical style.
 
 > **Current status:** Sprint 1 adds an optional Qdrant similarity projection;

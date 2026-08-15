@@ -283,6 +283,24 @@ def sync_completed(session: Session, client: QdrantClient, *, batch_size: int = 
     return SyncReport(len(rows), len(valid), skipped, len(expected - current), len(current - expected))
 
 
+def sync_calibrated(session: Session, client: QdrantClient, profile: Any, *, batch_size: int = 100) -> SyncReport:
+    """Project a separately calibrated space; raw SQLite vectors are never changed."""
+    from neuroacoustic.calibration import CALIBRATED_VECTOR_VERSION, transform
+    client.initialize_collection()
+    rows = completed_rows(session); current = client.point_ids(); valid = []; skipped = 0
+    for row in rows:
+        try:
+            vector = transform(validated_analysis_vector(row), profile)
+        except (QdrantError, ValueError):
+            skipped += 1; continue
+        payload = point_payload(row)
+        payload.update({"vector_version": CALIBRATED_VECTOR_VERSION, "calibration_version": profile.version, "calibration_profile_sha256": profile.profile_sha256, "preliminary_vector": validated_analysis_vector(row)})
+        valid.append({"id": deterministic_point_id(row.id), "vector": vector, "payload": payload})
+    for start in range(0, len(valid), batch_size): client.upsert(valid[start:start + batch_size])
+    expected = {point["id"] for point in valid}
+    return SyncReport(len(rows), len(valid), skipped, len(expected-current), len(current-expected))
+
+
 def scalar_comparisons(query: Analysis, payload: dict[str, Any]) -> str:
     """Concise numeric deltas, never a semantic or LLM-generated similarity claim."""
     parts: list[str] = []

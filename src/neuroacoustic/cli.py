@@ -39,7 +39,11 @@ from neuroacoustic.qdrant import (
     QdrantSettings,
     metric_explanation,
     sync_completed,
+    sync_calibrated,
     validated_analysis_vector,
+)
+from neuroacoustic.calibration import (
+    DEFAULT_CALIBRATED_COLLECTION, build_profile, save_profile,
 )
 
 app = typer.Typer(
@@ -181,12 +185,59 @@ def qdrant_sync(
         _fail(str(exc))
 
 
+def _calibration_profile(session: Session):
+    from neuroacoustic.qdrant import completed_rows
+    rows = completed_rows(session)
+    vectors = [validated_analysis_vector(row) for row in rows]
+    return build_profile(vectors, [row.id for row in rows])
+
+
+@qdrant_app.command("calibration-report")
+def qdrant_calibration_report(
+    database: Path = typer.Option(..., "--database"),
+    profile: Optional[Path] = typer.Option(None, "--profile", help="Optional JSON profile output"),
+) -> None:
+    """Report robust corpus calibration; optionally save its reproducible JSON profile."""
+    try:
+        engine = assert_db_usable(database)
+        with Session(engine) as session:
+            value = _calibration_profile(session)
+        if profile:
+            save_profile(value, profile)
+        console.print(f"version={value.version} samples={value.sample_count} inactive_dimensions={value.inactive_dimensions}")
+        console.print("profile=" + (str(profile) if profile else "not written (pass --profile PATH)"))
+    except (NeuroAcousticError, ValueError) as exc:
+        _fail(str(exc))
+
+
+@qdrant_app.command("sync-calibrated")
+def qdrant_sync_calibrated(
+    database: Path = typer.Option(..., "--database"),
+    profile: Path = typer.Option(..., "--profile", exists=True),
+) -> None:
+    """Build the separate calibrated projection from a saved profile."""
+    try:
+        from neuroacoustic.calibration import load_profile
+        engine = assert_db_usable(database)
+        settings = QdrantSettings.from_environment()
+        if not settings.enabled: _fail("Qdrant is disabled. Set QDRANT_ENABLED=true to allow this command.")
+        if settings.collection != DEFAULT_CALIBRATED_COLLECTION:
+            _fail(f"Set QDRANT_COLLECTION={DEFAULT_CALIBRATED_COLLECTION!r} for calibrated sync.")
+        with Session(engine) as session:
+            report = sync_calibrated(session, QdrantClient(settings), load_profile(profile))
+        console.print(f"eligible={report.eligible} synced={report.synced} invalid={report.skipped_invalid} missing_before_sync={report.missing_before_sync}")
+    except (NeuroAcousticError, ValueError) as exc:
+        _fail(str(exc))
+
+
 @app.command("similar")
 def similar(
     analysis_id: str = typer.Argument(..., metavar="ANALYSIS_ID"),
     top: int = typer.Option(5, "--top", min=1, max=100),
     database: Optional[Path] = typer.Option(None, "--database"),
     config: Optional[Path] = typer.Option(None, "--config"),
+    space: str = typer.Option("preliminary", "--space", case_sensitive=False),
+    profile: Optional[Path] = typer.Option(None, "--profile", help="Required for calibrated space"),
 ) -> None:
     """Find vector neighbours and display their numeric acoustic deltas."""
     try:
@@ -197,7 +248,15 @@ def similar(
             if query.status != "completed":
                 _fail(f"Analysis {query.id} is not completed.")
             vector = validated_analysis_vector(query)
-            matches = _qdrant_client().search(vector, query.vector_version, query.id, top)
+            version = query.vector_version
+            if space == "calibrated":
+                if profile is None: _fail("--profile is required with --space calibrated.")
+                from neuroacoustic.calibration import CALIBRATED_VECTOR_VERSION, load_profile, transform
+                calibration = load_profile(profile); raw_vector = vector
+                vector = transform(vector, calibration); version = CALIBRATED_VECTOR_VERSION
+            elif space != "preliminary":
+                _fail("--space must be preliminary or calibrated.")
+            matches = _qdrant_client().search(vector, version, query.id, top)
         table = Table(title=f"Similar to analysis {query.id} (metric neighbours, not corpus-calibrated)")
         table.add_column("Score", justify="right")
         table.add_column("Analysis ID", justify="right")
@@ -211,6 +270,17 @@ def similar(
                 isinstance(value, (int, float)) and math.isfinite(float(value)) for value in candidate_vector
             ):
                 explanation = metric_explanation(vector, [float(value) for value in candidate_vector])
+            if space == "calibrated":
+                from neuroacoustic.calibration import explanation as calibrated_explanation
+                raw_candidate = payload.get("preliminary_vector")
+                if payload.get("calibration_profile_sha256") != calibration.profile_sha256:
+                    _fail("calibration profile does not match calibrated Qdrant payload.")
+                if not isinstance(raw_candidate, list) or len(raw_candidate) != 36:
+                    _fail("calibrated Qdrant result lacks its raw-vector snapshot.")
+                detail = calibrated_explanation(raw_vector, [float(v) for v in raw_candidate], calibration)
+                best = ", ".join(f"{x['name']} Δz={x['standardized_difference']:.2f} w={x['weight']:.2f}" for x in detail["positive"][:3])
+                worst = ", ".join(f"{x['name']} Δz={x['standardized_difference']:.2f} w={x['weight']:.2f}" for x in detail["negative"][:3])
+                explanation = f"weighted standardized distance: {detail['groups']}; closest: {best}; differs: {worst}"
             table.add_row(
                 f"{float(match.get('score', 0)):.6f}", str(payload.get("analysis_id", "—")),
                 str(payload.get("filename") or "—"), explanation,
