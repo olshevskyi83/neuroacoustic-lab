@@ -42,6 +42,7 @@ data/output/*
 !data/output/.gitkeep
 data/db/*
 !data/db/.gitkeep
+data/pilot-library/
 # Ephemeral demos / local scratch (not user source libraries)
 data/tmp/
 data/tmp_*/
