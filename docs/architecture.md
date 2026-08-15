@@ -180,11 +180,30 @@ Top-level fields include `root_directory`, `database_path`, `started_at`,
 `path`, `disposition`, `analysis_id`, `duration_seconds`, `error`, `warnings`.
 Public reports omit stack traces.
 
-## Future vector search
+## Optional Qdrant projection (Sprint 1)
 
-SQLite remains the local system of record for fingerprints and metadata.
-A later vector database (e.g. Qdrant) will index embeddings without making
-SQLite rows disposable. Batch indexing does **not** implement similarity search.
+SQLite remains the local system of record. Qdrant is an explicit, rebuildable
+read projection and is never invoked from `analyze` or `index`; a Qdrant outage
+therefore cannot invalidate or block SQLite analysis/indexing. The integration
+touches only the configured collection (default: `neuroacoustic_fingerprints`),
+never `homelab_knowledge` or `homelab_knowledge_qwen`.
+
+Collection creation is idempotent and refuses an existing collection unless its
+immutable vector configuration is exactly `size: 36`, `distance: Cosine`.
+`qdrant sync` reads completed SQLite rows, validates `vector_version` is
+`0.4.0-preliminary`, validates exactly 36 finite numeric values, then performs
+idempotent deterministic-ID batch upserts. It does not delete projection points.
+
+Each point payload contains `analysis_id`, `track_id`, `content_hash`,
+`filename`, `analysis_version`, `vector_version`, `created_at`, `updated_at`,
+and finite scalar acoustic summaries only. No source or artifact filesystem
+paths are exported.
+
+`similar` filters to the query vector version and excludes the query analysis.
+Alongside Qdrant's whole-vector cosine score it reports four independently
+calculated grouped cosines over returned candidate vectors: spectral, harmonic,
+decay/envelope, and stereo/energy. This makes the explanation a direct metric
+decomposition; it is not a corpus-calibrated quality or semantic claim.
 
 ## Safety
 

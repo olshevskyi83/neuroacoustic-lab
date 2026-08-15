@@ -1,8 +1,30 @@
 # NeuroAcoustic Lab
 
+## Optional Qdrant projection
+
+SQLite is the source of truth. Qdrant is an optional, rebuildable projection of
+completed SQLite analyses and is never required for analysis to succeed. The
+integration exclusively uses `neuroacoustic_fingerprints`; it does not write to
+or query-write any other collection. Its current layout is a 36-dimensional
+cosine vector with vector version `0.4.0-preliminary`.
+
+Set `QDRANT_ENABLED=true` and optionally `QDRANT_URL` / `QDRANT_COLLECTION`,
+then run `neuroacoustic qdrant doctor`, `neuroacoustic qdrant init`, and
+`neuroacoustic qdrant sync --database PATH`. Sync upserts completed records and
+reports missing or stale points, but does not delete stale points. `neuroacoustic
+similar ANALYSIS_ID --database PATH --top N` filters to the same vector version,
+excludes the query record, and reports the Qdrant cosine score plus component
+cosines calculated from the returned vectors: spectral, harmonic,
+decay/envelope, and stereo/energy. These are metric decompositions, not labels
+or semantic explanations.
+
+The `0.4.0-preliminary` vectors have not been corpus-calibrated. In particular,
+the 25 pilot samples are insufficient to make broad similarity-quality claims.
+
 Local-first research platform for analyzing sound by its **physical acoustic properties** — not genre, artist, album, or musical style.
 
-> **Current status:** Milestone 4C — batch directory indexing into SQLite. Envelope/stereo/rhythm/decay (4A) and persistence (4B) included. No web UI or vector search yet.
+> **Current status:** Sprint 1 adds an optional Qdrant similarity projection;
+> SQLite analysis and batch indexing remain the system of record.
 
 ## Philosophy
 

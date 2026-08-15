@@ -37,3 +37,7 @@ class DatabaseSchemaError(DatabaseError):
 
 class AnalysisNotFoundError(DatabaseError):
     """Requested analysis / track ID does not exist."""
+
+
+class QdrantError(NeuroAcousticError):
+    """Qdrant projection is unavailable or incompatible (SQLite is unaffected)."""

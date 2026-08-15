@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.metadata
 import json
+import math
 import platform
 import shutil
 import sys
@@ -33,6 +34,13 @@ from neuroacoustic.persistence.repository import (
     list_analyses,
     resolve_analysis_or_track_id,
 )
+from neuroacoustic.qdrant import (
+    QdrantClient,
+    QdrantSettings,
+    metric_explanation,
+    sync_completed,
+    validated_analysis_vector,
+)
 
 app = typer.Typer(
     name="neuroacoustic",
@@ -42,6 +50,8 @@ app = typer.Typer(
 )
 db_app = typer.Typer(help="SQLite database commands.")
 app.add_typer(db_app, name="db")
+qdrant_app = typer.Typer(help="Rebuildable Qdrant projection commands.")
+app.add_typer(qdrant_app, name="qdrant")
 
 console = Console(stderr=False)
 err_console = Console(stderr=True)
@@ -86,6 +96,128 @@ def _resolve_database_option(
     if path is None and required:
         _fail("No database path: pass --database or set paths.database in config.")
     return Path(path)
+
+
+def _qdrant_client(*, require_enabled: bool = True) -> QdrantClient:
+    settings = QdrantSettings.from_environment()
+    if require_enabled and not settings.enabled:
+        _fail("Qdrant is disabled. Set QDRANT_ENABLED=true to allow this command.")
+    return QdrantClient(settings)
+
+
+@qdrant_app.command("doctor")
+def qdrant_doctor() -> None:
+    """Check Qdrant reachability without creating or changing a collection."""
+    try:
+        settings = QdrantSettings.from_environment()
+        table = Table(title="NeuroAcoustic — Qdrant doctor")
+        table.add_column("Check", style="cyan")
+        table.add_column("Status")
+        table.add_column("Detail")
+        table.add_row("enabled", "ok" if settings.enabled else "disabled", str(settings.enabled).lower())
+        table.add_row("url", "ok", settings.url)
+        table.add_row("collection", "ok", settings.collection)
+        table.add_row("vector", "ok", "36 dimensions / Cosine / 0.4.0-preliminary")
+        if settings.enabled:
+            QdrantClient(settings).health()
+            table.add_row("health", "ok", "reachable")
+        else:
+            table.add_row("health", "skipped", "set QDRANT_ENABLED=true to test")
+        console.print(table)
+    except NeuroAcousticError as exc:
+        _fail(str(exc))
+
+
+@qdrant_app.command("init")
+def qdrant_init() -> None:
+    """Idempotently create or verify only the configured dedicated collection."""
+    try:
+        client = _qdrant_client()
+        created = client.initialize_collection()
+        console.print(
+            f"Qdrant collection {client.settings.collection!r} "
+            f"{'created' if created else 'already compatible'} (36 / Cosine)."
+        )
+    except NeuroAcousticError as exc:
+        _fail(str(exc))
+
+
+@qdrant_app.command("status")
+def qdrant_status() -> None:
+    """Show projection collection state without modifying it."""
+    try:
+        settings = QdrantSettings.from_environment()
+        if not settings.enabled:
+            console.print("Qdrant disabled (QDRANT_ENABLED=false); no request made.")
+            return
+        info = QdrantClient(settings).collection_info()
+        if info is None:
+            console.print(f"Collection {settings.collection!r} does not exist.")
+            return
+        vectors = info.get("config", {}).get("params", {}).get("vectors", {})
+        console.print(
+            f"collection={settings.collection} points={info.get('points_count', 0)} "
+            f"size={vectors.get('size')} distance={vectors.get('distance')}"
+        )
+    except NeuroAcousticError as exc:
+        _fail(str(exc))
+
+
+@qdrant_app.command("sync")
+def qdrant_sync(
+    database: Path = typer.Option(..., "--database", help="SQLite source database path"),
+) -> None:
+    """Idempotently project completed SQLite analyses; never deletes stale points."""
+    try:
+        engine = assert_db_usable(database)
+        client = _qdrant_client()
+        with Session(engine) as session:
+            report = sync_completed(session, client)
+        console.print(
+            f"eligible={report.eligible} synced={report.synced} invalid={report.skipped_invalid} "
+            f"missing_before_sync={report.missing_before_sync} stale_not_deleted={report.stale_points}"
+        )
+    except NeuroAcousticError as exc:
+        _fail(str(exc))
+
+
+@app.command("similar")
+def similar(
+    analysis_id: str = typer.Argument(..., metavar="ANALYSIS_ID"),
+    top: int = typer.Option(5, "--top", min=1, max=100),
+    database: Optional[Path] = typer.Option(None, "--database"),
+    config: Optional[Path] = typer.Option(None, "--config"),
+) -> None:
+    """Find vector neighbours and display their numeric acoustic deltas."""
+    try:
+        db_path = _resolve_database_option(database, config)
+        engine = assert_db_usable(db_path)
+        with Session(engine) as session:
+            query = resolve_analysis_or_track_id(session, analysis_id)
+            if query.status != "completed":
+                _fail(f"Analysis {query.id} is not completed.")
+            vector = validated_analysis_vector(query)
+            matches = _qdrant_client().search(vector, query.vector_version, query.id, top)
+        table = Table(title=f"Similar to analysis {query.id} (metric neighbours, not corpus-calibrated)")
+        table.add_column("Score", justify="right")
+        table.add_column("Analysis ID", justify="right")
+        table.add_column("Filename")
+        table.add_column("Vector metric explanation")
+        for match in matches:
+            payload = match.get("payload", {})
+            candidate_vector = match.get("vector")
+            explanation = "group metrics unavailable (Qdrant did not return vector)"
+            if isinstance(candidate_vector, list) and all(
+                isinstance(value, (int, float)) and math.isfinite(float(value)) for value in candidate_vector
+            ):
+                explanation = metric_explanation(vector, [float(value) for value in candidate_vector])
+            table.add_row(
+                f"{float(match.get('score', 0)):.6f}", str(payload.get("analysis_id", "—")),
+                str(payload.get("filename") or "—"), explanation,
+            )
+        console.print(table)
+    except NeuroAcousticError as exc:
+        _fail(str(exc))
 
 
 @app.command("doctor")
